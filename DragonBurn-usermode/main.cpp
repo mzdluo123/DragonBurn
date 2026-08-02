@@ -24,11 +24,12 @@
 using namespace std;
 
 namespace fs = filesystem;
-string fileName;
-bool secureMode, legacyImg, forceprefs;
+bool secureMode = false;
+bool legacyImg = false;
+bool forceprefs = false;
 
 void Cheat();
-bool CheckArg(const int&, char**, const std::string&);
+bool CheckArg(const int& argc, char** argv, const std::string& value);
 
 int main(int argc, char* argv[])
 {
@@ -52,14 +53,15 @@ int main(int argc, char* argv[])
 
 bool CheckArg(const int& argc, char** argv, const std::string& value)
 {
-	for (size_t i = 0; i < argc; i++)
+	for (size_t i = 0; i < static_cast<size_t>(argc); ++i)
 	{
-		std::string arg = argv[i];
+		const std::string arg = argv[i];
 		if (arg == "--" + value || arg == "/" + value)
 			return true;
 	}
 	return false;
 }
+
 
 void Cheat()
 {
@@ -145,9 +147,9 @@ CHECK_VER://CHECK_VER
 #endif
 
 	bool mapped = false;
-CONNECT_KERNEL://CONNECT_KERNEL
+CONNECT_KERNEL:
 	Log::Info("Connecting to kernel mode driver...");
-	if (memoryManager.ConnectDriver(L"\\\\.\\DragonBurn-kmd"))
+	if (memoryManager.ConnectDriver())
 	{
 		Log::PreviousLine();
 		Log::Fine("Successfully connected to kernel mode driver");
@@ -159,7 +161,7 @@ CONNECT_KERNEL://CONNECT_KERNEL
 			Log::Warning("Failed to connect to kernel mode driver");
 		else
 			Log::Error("Failed to connect to kernel mode driver");
-		
+
 		Log::Info("Triggered auto-map protocol");
 		Log::Info("Looking for kernel mapper...");
 
@@ -167,22 +169,21 @@ CONNECT_KERNEL://CONNECT_KERNEL
 		{
 			Log::PreviousLine();
 			std::string mapperInfo = "Executing kernel mapper, flags: "
-				+ std::string(secureMode ? "--securemode" : "")
-				+ std::string(legacyImg ? "--legacyimg" : "")
-				+ std::string(forceprefs ? "--forceprefs" : "")
+				+ std::string(secureMode ? "--securemode " : "")
+				+ std::string(legacyImg ? "--legacyimg " : "")
+				+ std::string(forceprefs ? "--forceprefs " : "")
 				+ std::string("...");
 			Log::Info(mapperInfo);
-			int result = Init::Verify::ExecuteMapper(secureMode, legacyImg, forceprefs);
+			const int result = Init::Verify::ExecuteMapper(secureMode, legacyImg, forceprefs);
 
 			Log::PreviousLine();
 			if (result == 0)
 			{
 				Log::Fine("Successfully mapped kernel mode driver");
 				mapped = true;
-				goto CONNECT_KERNEL;//CONNECT_KERNEL
+				goto CONNECT_KERNEL;
 			}
-			else
-				Log::Error("Failed to map kernel mode driver");
+			Log::Error("Failed to map kernel mode driver");
 		}
 		else
 		{

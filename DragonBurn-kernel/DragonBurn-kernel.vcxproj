@@ -111,6 +111,7 @@
     <ClInclude Include="include\service.h" />
     <ClInclude Include="include\utils.h" />
     <ClInclude Include="include\web_api.h" />
+    <ClInclude Include="..\Shared\DragonBurnProtocol.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>

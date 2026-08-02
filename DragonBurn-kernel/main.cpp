@@ -13,6 +13,7 @@
 #include "cfg.h"
 #include "web_api.h"
 #include "logger.h"
+#include "../Shared/DragonBurnProtocol.h"
 
 using json = nlohmann::json;
 
@@ -58,7 +59,10 @@ int wmain(const int argc, wchar_t** argv)
 	if (indPagesMode)
 		Log::Info("Enabled: Secure mapping and execution mode");
 
-	if (IsDriverRunning(L"\\\\.\\DragonBurn-kmd"))
+	DragonBurn::Protocol::DeviceNames deviceNames{};
+	if (!DragonBurn::Protocol::BuildLocalDeviceNames(&deviceNames))
+		Log::Error("Failed to derive the host-specific device name");
+	if (IsDriverRunning(deviceNames.userPath))
 		Log::Error("Kernel mode driver is already mapped");
 
 #ifndef _DEBUG
@@ -104,11 +108,11 @@ CHECK_VER://CHECK_VER
 		} while (response != "y" && response != "n");
 		if (response == "y")
 		{
-			system("reg add \"HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity\" /v Enabled /t REG_DWORD /d 0 /f >nul 2>&1");
-			system("reg add \"HKLM\SYSTEM\CurrentControlSet\Control\Lsa\" /v RunAsPPL /t REG_DWORD /d 0 /f >nul 2>&1");
-			system("reg add \"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\DeviceGuard\" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 00000000 /f >nul 2>&1");
+			system(R"(reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v Enabled /t REG_DWORD /d 0 /f >nul 2>&1)");
+			system(R"(reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v RunAsPPL /t REG_DWORD /d 0 /f >nul 2>&1)");
+			system(R"(reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 00000000 /f >nul 2>&1)");
 			system("bcdedit /set hypervisorlaunchtype off >nul 2>&1");
-			system("reg add \"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\CI\Config\" /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 00000000 /f >nul 2>&1");
+			system(R"(reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 00000000 /f >nul 2>&1)");
 			system("sc stop faceit >nul 2>&1");
 			system("sc stop vgc >nul 2>&1");
 			system("sc stop vgk >nul 2>&1");
@@ -126,20 +130,23 @@ CHECK_VER://CHECK_VER
 	system("sc stop vgk >nul 2>&1");
 
 
+	std::vector<BYTE> externalImage;
 	BYTE* img = nullptr;
-	if (!legacyImg)
+	std::vector<uint8_t>& embeddedImage = legacyImg ? cfg::imageLegacy : cfg::image;
+	if (!embeddedImage.empty())
 	{
-		if (cfg::image.empty())
-			Log::Error("Driver image is empty");
-		RollingVectorProcedure(cfg::image, cfg::key);
-		img = cfg::image.data();
+		RollingVectorProcedure(embeddedImage, cfg::key);
+		img = embeddedImage.data();
 	}
 	else
 	{
-		if (cfg::imageLegacy.empty())
-			Log::Error("Driver image is empty");
-		RollingVectorProcedure(cfg::imageLegacy, cfg::key);
-		img = cfg::imageLegacy.data();
+		const std::wstring imageName = legacyImg
+			? L"DragonBurn-kmd-legacy.sys"
+			: L"DragonBurn-kmd.sys";
+		const std::wstring imagePath = kdmUtils::GetCurrentAppFolder() + L"\\" + imageName;
+		if (!kdmUtils::ReadFileToMemory(imagePath, &externalImage) || externalImage.empty())
+			Log::Error("Failed to read driver image from the mapper directory");
+		img = externalImage.data();
 	}
 
 	if (!NT_SUCCESS(intel_driver::Load()))

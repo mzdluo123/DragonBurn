@@ -132,68 +132,39 @@ Press END key to open/close menu.
 
 ### 🛠️How to use
 
-At the beginning, download latest release or compile project by yourself. You need only 2 files `DragonBurn.exe` and `DragonBurn-kernel.exe`.
+Build `DragonBurn.sln` as `Debug|x64` or `Release|x64` with Visual Studio 2022 and the Windows Driver Kit. Keep these three outputs in the same directory:
 
-> [!NOTE]
-> Kernel driver is closed-source for safety reasons. Please download the compiled binary from the releases.
+- `DragonBurn-usermode.exe`
+- `DragonBurn-kernel.exe`
+- `DragonBurn-kmd.sys`
 
-Once downloaded, run `DragonBurn-kernel.exe` to map the driver. If u see `[+] success` all fine, then just run `DragonBurn.exe` and gl hf.
+Run `DragonBurn-usermode.exe` as administrator. It derives the host-specific device path (`\\.\<32 hexadecimal characters>`) from the active computer name, connects to it, and, if unavailable, launches `DragonBurn-kernel.exe`, waits for the mapper to finish, and reconnects automatically.
 
----
+The mapper restores the original Intel vulnerable-driver loading flow. When `cfg::image` is empty, it reads `DragonBurn-kmd.sys` from its own directory. Embedded and encrypted `cfg::image` data remains supported.
 
-### ❌Errors
+Supported user-mode flags are forwarded to the mapper:
 
-<img src="imgs/error_1.png" width="400" height="90">
+- `--securemode`: allocate independent pages and apply per-section protection.
+- `--legacyimg`: use embedded `cfg::imageLegacy`, or `DragonBurn-kmd-legacy.sys` beside the mapper.
+- `--forceprefs`: force the original Windows kernel-preference prompt.
 
-> Error: `Windows Defender, other antivirus programs, or anti-cheats may flag cheat as virus`
->
-> Solution: Turn off real-time protection
+`DragonBurn-kmd.sys` supports both entry paths: normal Service Control Manager loading and kdmapper-style invocation with null `DriverObject`/`RegistryPath` parameters. Both paths derive the same case-insensitive host-specific token before registering the driver object, device, symbolic link, and IOCTL dispatch table. The device ACL continues to grant access only to SYSTEM and administrators.
 
 ---
 
 ### ❌Mapper errors
 
-cmd should be opened as admin
+> Error: `Failed to read driver image from the mapper directory`.
+>
+> Solution: Place `DragonBurn-kmd.sys` next to `DragonBurn-kernel.exe`. For `--legacyimg`, provide `DragonBurn-kmd-legacy.sys` or populate `cfg::imageLegacy`.
 
-> Error: `[x] Kernel-mode driver image is empty`
+> Error: `Failed to connect to intel driver`.
 >
-> Solution: Fill `std::vector<uint8_t> image = {};` in `cfg.h` with kernel binaries
+> Solution: Run the mapper as administrator and check the Windows vulnerable-driver blocklist/HVCI state.
 
-> Error: `[x] \Device\Nal is already in use.`
+> Error: `Failed to connect to kernel mode driver` after mapping.
 >
-> Solution: Use [NalFix](https://github.com/VollRagm/NalFix)
-
-> Error: `[x] Your vulnerable driver list is enabled and have blocked the driver loading`
->
-> Solution: Disable vulnerable driver list, [official solution](https://support.microsoft.com/en-au/topic/kb5020779-the-vulnerable-driver-blocklist-after-the-october-2022-preview-release-3fcbe13a-6013-4118-b584-fcfbc6a09936)
-
-> Still getting: `[x] Failed to register and start service for the vulnerable driver`
->
-> Solution: Turn off all antiviruses and all anti-cheat clients, usually caused by faceit anti-cheat
->
-> Faceit: `sc stop faceit`
-> Vanguard: `sc stop vgc` `sc stop vgk`
-
-<!--
-> Error: `Driver is mapped successfully but failed to connect to kernel`
->
-> Solution: Reboot pc and manually run mapper with `--legacymethod`
--->
-
-> [!TIP]
-> These cmds should fix any issues (after executing restart pc):
->
-> ```
-> reg add \"HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity\" /v Enabled /t REG_DWORD /d 0 /f
->
-> reg add \"HKLM\SYSTEM\CurrentControlSet\Control\Lsa\" /v RunAsPPL /t REG_DWORD /d 0 /f
->
-> reg add \"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\DeviceGuard\" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 00000000 /f
->
-> bcdedit /set hypervisorlaunchtype off
->
-> reg add \"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\CI\Config\" /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 00000000 /f
-> ```
+> Solution: Check the mapper's returned NTSTATUS. The mapper, client, and driver must see the same active computer name so they derive the same `\\.\<32 hexadecimal characters>` path.
 
 ---
 

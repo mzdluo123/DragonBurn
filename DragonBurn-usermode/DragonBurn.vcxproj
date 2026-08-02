@@ -142,6 +142,7 @@
     <ClInclude Include="OS-ImGui\OS-ImGui_Struct.h" />
     <ClInclude Include="OS-ImGui\stb\stb_image.h" />
     <ClInclude Include="Core\MemoryMgr.h" />
+    <ClInclude Include="..\Shared\DragonBurnProtocol.h" />
     <ClInclude Include="Resources\resource.h" />
     <ClInclude Include="Resources\Font.h" />
     <ClInclude Include="Resources\Images.h" />

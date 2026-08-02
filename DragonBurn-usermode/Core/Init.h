@@ -95,44 +95,39 @@ namespace Init
 
         static int ExecuteMapper(bool secureMode, bool legacyImg, bool forceprefs)
         {
-            STARTUPINFOW si = { sizeof(STARTUPINFOW) };
-            PROCESS_INFORMATION pi = {};
+            STARTUPINFOW startupInfo{ sizeof(STARTUPINFOW) };
+            PROCESS_INFORMATION processInfo{};
+            startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+            startupInfo.wShowWindow = SW_SHOW;
 
-            si.dwFlags = STARTF_USESHOWWINDOW;
-            si.wShowWindow = SW_SHOW;
-
-            std::wstring cmdLine = L"DragonBurn-kernel.exe" 
+            std::wstring commandLine = L"DragonBurn-kernel.exe"
                 + std::wstring(secureMode ? L" --securemode" : L"")
                 + std::wstring(legacyImg ? L" --legacyimg" : L"")
                 + std::wstring(forceprefs ? L" --forceprefs" : L"");
-            BOOL success = CreateProcessW(
-                nullptr,                   // Application name
-                &cmdLine[0],               // Command line (must be modifiable)
-                nullptr,                   // Process security attributes
-                nullptr,                   // Thread security attributes
-                FALSE,                     // Inherit handles
-                CREATE_NEW_CONSOLE,        // Creation flags - creates new console
-                nullptr,                   // Environment
-                nullptr,                   // Current directory
-                &si,                       // Startup info
-                &pi                        // Process info
-            );
 
-            int result = -1;
-            if (success)
-            {
-                WaitForSingleObject(pi.hProcess, INFINITE);
+            const BOOL success = CreateProcessW(
+                nullptr,
+                commandLine.data(),
+                nullptr,
+                nullptr,
+                FALSE,
+                CREATE_NEW_CONSOLE,
+                nullptr,
+                nullptr,
+                &startupInfo,
+                &processInfo);
 
-                DWORD exitCode;
-                GetExitCodeProcess(pi.hProcess, &exitCode);
-                result = static_cast<int>(exitCode);
+            if (!success)
+                return -1;
 
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-            }
-
-            return result;
+            WaitForSingleObject(processInfo.hProcess, INFINITE);
+            DWORD exitCode = static_cast<DWORD>(-1);
+            GetExitCodeProcess(processInfo.hProcess, &exitCode);
+            CloseHandle(processInfo.hProcess);
+            CloseHandle(processInfo.hThread);
+            return static_cast<int>(exitCode);
         }
+
 	};
 
     class Client
