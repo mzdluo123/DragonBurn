@@ -13,7 +13,7 @@ namespace OSImGui
      .BufferDesc = {
          .Width = 0,
          .Height = 0,
-         .RefreshRate = {.Numerator = 60, .Denominator = 1 },
+         .RefreshRate = {.Numerator = 0, .Denominator = 1 },
          .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
          .ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED,
          .Scaling = DXGI_MODE_SCALING_UNSPECIFIED
@@ -280,7 +280,6 @@ namespace OSImGui
 
     void OSImGui_External::MainLoop()
     {
-        static int frameSkip = 0;
 
         // Cache frequently used values
         constexpr DWORD excludeCapture = WDA_EXCLUDEFROMCAPTURE;
@@ -304,10 +303,9 @@ namespace OSImGui
                     g_Device.g_pd3dDeviceContext->OMSetRenderTargets(1, &g_Device.g_mainRenderTargetView, nullptr);
                     g_Device.g_pd3dDeviceContext->ClearRenderTargetView(g_Device.g_mainRenderTargetView, actualClearColor);
 
-                    g_Device.g_pSwapChain->Present(0, 0);
-                    frameSkip = 0;
-
+                    g_Device.g_pSwapChain->Present(1, 0);
                     Sleep(1);
+
                     continue;
                 }
             }
@@ -356,7 +354,6 @@ namespace OSImGui
                 toggleKey(VK_OEM_7, keyState[VK_OEM_7], io);			// /
             } else { io.ClearInputKeys(); }
 
-            ++frameSkip; // Prefix increment is slightly more efficient
 
             // ImGui frame setup
             ImGui_ImplDX11_NewFrame();
@@ -367,26 +364,16 @@ namespace OSImGui
 
             ImGui::Render();
 
-            // Frame rate control - only present every N frames
-            // note from laith: increasing N will cause a little esp delay but when set to 2 its almost unnoticable and the perfoamnce gain is giagantic (double FPS)
-            if (frameSkip >= 2) {
-                // Set window display affinity based on OBS bypass setting
+            // Present once per vertical blank. A zero refresh-rate numerator lets
+            // DXGI follow the desktop refresh rate of the current monitor.
+            SetWindowDisplayAffinity(Window.hWnd, MenuConfig::BypassOBS ? excludeCapture : includeCapture);
 
-                SetWindowDisplayAffinity(Window.hWnd, MenuConfig::BypassOBS ? excludeCapture : includeCapture);
+            const float* actualClearColor = reinterpret_cast<const float*>(&Window.BgColor.Value);
 
-
-                // Use direct array access instead of creating temporary array
-                static constexpr float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-                const float* actualClearColor = reinterpret_cast<const float*>(&Window.BgColor.Value);
-
-                g_Device.g_pd3dDeviceContext->OMSetRenderTargets(1, &g_Device.g_mainRenderTargetView, nullptr);
-                g_Device.g_pd3dDeviceContext->ClearRenderTargetView(g_Device.g_mainRenderTargetView, actualClearColor);
-                ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-
-                // Present with no sync for maximum performance
-                g_Device.g_pSwapChain->Present(0, 0);
-                frameSkip = 0;
-            }
+            g_Device.g_pd3dDeviceContext->OMSetRenderTargets(1, &g_Device.g_mainRenderTargetView, nullptr);
+            g_Device.g_pd3dDeviceContext->ClearRenderTargetView(g_Device.g_mainRenderTargetView, actualClearColor);
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+            g_Device.g_pSwapChain->Present(1, 0);
         }
         CleanImGui();
     }
