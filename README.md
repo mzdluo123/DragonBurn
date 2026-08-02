@@ -132,7 +132,14 @@ Press END key to open/close menu.
 
 ### 🛠️How to use
 
-Build `DragonBurn.sln` as `Debug|x64` or `Release|x64` with Visual Studio 2022 and the Windows Driver Kit. Keep these three outputs in the same directory:
+Configure and build with CMake, the Visual Studio 2022 generator, MSVC v143, and the Windows Driver Kit:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -T v143
+cmake --build build --config Release --parallel
+```
+
+Use `--config Debug` for a debug build. CMake builds the user-mode client and mapper directly, and invokes the WDK `.vcxproj` for the kernel driver. It writes the following three Release outputs to `built/` (`built_dbg/` for Debug):
 
 - `DragonBurn-usermode.exe`
 - `DragonBurn-kernel.exe`
