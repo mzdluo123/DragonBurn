@@ -495,13 +495,12 @@ bool EntityBatchProcessor::ProcessAllEntities(
 	if (!ProcessDependenciesData(entities, weaponDataAddresses, cameraAddresses)) {
 		return false;
 	}
-	// Phase 5: Bone Data (process individually for now)
-	for (auto& [entityIndex, entity] : entities) {
-
-		if (entity.Pawn.Address != 0) {
-			entity.Pawn.BoneData.UpdateAllBoneData(entity.Pawn.Address);
-		}
-	}
+	// Phase 5: Bone Data. A stale pawn must not leave an empty bone vector
+	// for render and target-selection code to index.
+	std::erase_if(entities, [](auto& indexedEntity) {
+		auto& pawn = indexedEntity.second.Pawn;
+		return pawn.Address == 0 || !pawn.BoneData.UpdateAllBoneData(pawn.Address);
+	});
 
 	return true;
 }
@@ -550,7 +549,7 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 	}
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemory(requests, buffer.data())) {
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data())) {
 		return false;
 	}
 
@@ -686,7 +685,7 @@ bool EntityBatchProcessor::ProcessServiceData(
 		totalSize += request.second;
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemory(requests, buffer.data()))
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data()))
 		return false;
 
 	SIZE_T bufferOffset = 0;
@@ -746,7 +745,7 @@ bool EntityBatchProcessor::ProcessWeaponData(
 	}
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemory(requests, buffer.data())) {
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data())) {
 		return false;
 	}
 
@@ -830,7 +829,7 @@ bool EntityBatchProcessor::ProcessDependenciesData(
 	}
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemory(requests, buffer.data())) {
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data())) {
 		return false;
 	}
 

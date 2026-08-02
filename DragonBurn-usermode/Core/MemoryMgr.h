@@ -17,6 +17,9 @@ public:
     DWORD GetProcessID(const wchar_t* processName);
     //DWORD64 TraceAddress(DWORD64 baseAddress, std::vector<DWORD> offsets);
     bool BatchReadMemory(const std::vector<std::pair<DWORD64, SIZE_T>>& requests, void* output_buffer);
+    // Reads valid ranges even when another request in the batch is stale.
+    // Failed ranges are zeroed; returns true when at least one range succeeds.
+    bool BatchReadMemoryBestEffort(const std::vector<std::pair<DWORD64, SIZE_T>>& requests, void* output_buffer);
 
     template <typename ReadType>
     bool ReadMemory(DWORD64 address, ReadType& value, SIZE_T size = sizeof(ReadType))

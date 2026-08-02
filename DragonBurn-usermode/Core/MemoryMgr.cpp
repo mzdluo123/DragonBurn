@@ -215,3 +215,57 @@ bool MemoryMgr::BatchReadMemory(const std::vector<std::pair<DWORD64, SIZE_T>>& r
 
     return result == TRUE;
 }
+
+bool MemoryMgr::BatchReadMemoryBestEffort(
+    const std::vector<std::pair<DWORD64, SIZE_T>>& requests,
+    void* output_buffer)
+{
+    if (kernelDriver == nullptr || ProcessID == 0 || output_buffer == nullptr || requests.empty() ||
+        requests.size() > Protocol::MaxBatchRequests)
+    {
+        return false;
+    }
+
+    std::vector<SIZE_T> outputOffsets(requests.size() + 1, 0);
+    for (size_t index = 0; index < requests.size(); ++index)
+    {
+        const auto& request = requests[index];
+        if (request.first == 0 || request.second == 0 || request.second > Protocol::MaxSingleReadSize ||
+            request.first + request.second < request.first ||
+            request.second > Protocol::MaxBatchOutputSize - outputOffsets[index])
+        {
+            return false;
+        }
+
+        outputOffsets[index + 1] = outputOffsets[index] + request.second;
+    }
+
+    auto* output = static_cast<BYTE*>(output_buffer);
+    size_t successfulRequests = 0;
+
+    const auto readRange = [&](auto&& self, size_t begin, size_t end) -> void
+    {
+        std::vector<std::pair<DWORD64, SIZE_T>> rangeRequests(
+            requests.begin() + begin,
+            requests.begin() + end);
+
+        if (BatchReadMemory(rangeRequests, output + outputOffsets[begin]))
+        {
+            successfulRequests += end - begin;
+            return;
+        }
+
+        if (end - begin == 1)
+        {
+            SecureZeroMemory(output + outputOffsets[begin], requests[begin].second);
+            return;
+        }
+
+        const size_t middle = begin + (end - begin) / 2;
+        self(self, begin, middle);
+        self(self, middle, end);
+    };
+
+    readRange(readRange, 0, requests.size());
+    return successfulRequests != 0;
+}
