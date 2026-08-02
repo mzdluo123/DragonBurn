@@ -3,14 +3,10 @@
 #include <tchar.h>
 #include <shellapi.h>
 #include <cstdlib>
-#include <chrono>
 #include <thread>
 #include <psapi.h>
 #include <stdexcept>
-#include <format>
 #include "../Offsets/Offsets.h"
-#include "../Helpers/WebApi.h"
-#include "../Helpers/StorageMgr.h"
 
 namespace Init
 {
@@ -52,46 +48,6 @@ namespace Init
         //    SetConsoleTitle(title);
         //}
 
-        static bool CheckCheatVersion()
-        {
-            std::vector<std::string> versions;
-            try
-            {
-                json localVer = json::parse(storage::ReadStorageFile("versions.json"));
-
-                if (!localVer.contains("last-access-time") || !localVer.contains("usermode-ver") || localVer["usermode-ver"].is_null() || !localVer["usermode-ver"].is_array())
-                    throw std::runtime_error("Invalid json data");
-
-                std::stringstream ss(localVer["last-access-time"].get<std::string>());
-                std::chrono::system_clock::time_point lastAccessTime;
-                std::chrono::from_stream(ss, "%Y-%m-%d %H:%M:%S", lastAccessTime);
-
-                if (std::chrono::system_clock::now() - lastAccessTime > std::chrono::minutes(10))
-                    throw std::runtime_error("Version data is outdated");
-
-                for (const auto& version : localVer["usermode-ver"])
-                    versions.push_back(version.get<std::string>());
-            }
-            catch (std::exception error)
-            {
-                json cloudVer = json::parse(Web::Get("https://api.jsonbin.io/v3/b/690e4759ae596e708f4b20b3"))["record"];
-
-                if (!cloudVer.contains("usermode-ver") || cloudVer["usermode-ver"].is_null() || !cloudVer["usermode-ver"].is_array())
-                    throw std::runtime_error("Invalid json data");
-
-                for (const auto& version : cloudVer["usermode-ver"])
-                    versions.push_back(version.get<std::string>());
-
-                auto now = std::chrono::system_clock::now();
-                cloudVer["last-access-time"] = std::format("{:%Y-%m-%d %H:%M:%S}", now);
-
-                storage::WriteStorageFile("versions.json", cloudVer.dump(4));
-            }
-
-            if (std::find(versions.begin(), versions.end(), MenuConfig::version) != versions.end())
-                return true;
-            return false;
-        }
 
         static int ExecuteMapper(bool secureMode, bool legacyImg, bool forceprefs)
         {

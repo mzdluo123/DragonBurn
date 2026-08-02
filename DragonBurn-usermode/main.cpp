@@ -117,35 +117,6 @@ void Cheat()
 		Log::Error(error.what());
 	}
 
-#ifndef DBDEBUG
-	tryCount = 0;
-CHECK_VER://CHECK_VER
-	Log::Info("Checking cheat version...");
-	try 
-	{
-		bool result = Init::Verify::CheckCheatVersion();
-		Log::PreviousLine();
-		if (result)
-			Log::Fine("Your cheat version is up to date and supported");
-		else
-			Log::Error("Your cheat version is out of support");
-	}
-	catch (const std::exception& error)
-	{
-		Log::PreviousLine();
-		std::string errorMsg = error.what();
-		if (errorMsg.find("bad internet connection") != std::string::npos && tryCount < 3)
-		{
-			Log::Error(errorMsg, false, false);
-			Log::Info("Reconnecting...");
-			tryCount++;
-			goto CHECK_VER;//CHECK_VER
-		}
-		else
-			Log::Error(errorMsg);
-	}
-#endif
-
 	bool mapped = false;
 CONNECT_KERNEL:
 	Log::Info("Connecting to kernel mode driver...");

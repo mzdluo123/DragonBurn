@@ -5,21 +5,17 @@
 #include <filesystem>
 #include <sstream>
 #include <TlHelp32.h>
-#include "json.hpp"
 
 #include "kdmapper.h"
 #include "utils.h"
 #include "intel_driver.h"
 #include "cfg.h"
-#include "web_api.h"
 #include "logger.h"
 #include "../Shared/DragonBurnProtocol.h"
 
-using json = nlohmann::json;
 
 bool IsDriverRunning(const LPCWSTR name);
 LONG WINAPI SimplestCrashHandler(EXCEPTION_POINTERS* ExceptionInfo);
-bool CheckCheatVersion();
 bool CheckArg(const int argc, wchar_t** argv, const wchar_t* arg);
 DWORD getParentProcess();
 bool callbackExample(ULONG64* param1, ULONG64* param2, ULONG64 allocationPtr, ULONG64 allocationSize);
@@ -65,34 +61,6 @@ int wmain(const int argc, wchar_t** argv)
 	if (IsDriverRunning(deviceNames.userPath))
 		Log::Error("Kernel mode driver is already mapped");
 
-#ifndef _DEBUG
-	int tryCount = 0;
-CHECK_VER://CHECK_VER
-	Log::Info("Checking mapper version...");
-	try
-	{
-		bool result = CheckCheatVersion();
-		Log::PreviousLine();
-		if (result)
-			Log::Fine("Your mapper version is up to date and supported");
-		else
-			Log::Error("Your mapper version is out of support");
-	}
-	catch (const std::exception& error)
-	{
-		Log::PreviousLine();
-		std::string errorMsg = error.what();
-		if (errorMsg.find("bad internet connection") != std::string::npos && tryCount < 3)
-		{
-			Log::Error(errorMsg, false);
-			Log::Info("Reconnecting...");
-			tryCount++;
-			goto CHECK_VER;//CHECK_VER
-		}
-		else
-			Log::Error(errorMsg);
-	}
-#endif
 
 	if (forcePrefs || !CheckWindowsKernelPrefs())
 	{
@@ -288,21 +256,6 @@ bool CheckArg(const int argc, wchar_t** argv, const wchar_t* arg)
 	return false;
 }
 
-bool CheckCheatVersion()
-{
-	std::vector<std::string> versions;
-	json cloudVer = json::parse(Web::Get("https://api.jsonbin.io/v3/b/690e4759ae596e708f4b20b3"))["record"];
-
-	if (!cloudVer.contains("kernel-ver") || cloudVer["kernel-ver"].is_null() || !cloudVer["kernel-ver"].is_array())
-		throw std::runtime_error("Invalid json data");
-
-	for (const auto& version : cloudVer["kernel-ver"])
-		versions.push_back(version.get<std::string>());
-
-	if (std::find(versions.begin(), versions.end(), cfg::kmVersion) != versions.end())
-		return true;
-	return false;
-}
 
 bool IsDriverRunning(const LPCWSTR name)
 {
