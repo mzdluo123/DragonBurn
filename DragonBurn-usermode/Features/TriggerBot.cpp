@@ -143,9 +143,8 @@ void TriggerBot::ExecuteShot()
 
 std::string TriggerBot::GetWeapon(const CEntity& LocalEntity)
 {
-    // Single memory read to get the weapon pointer
-    DWORD64 CurrentWeapon;
-    if (!memoryManager.ReadMemory(LocalEntity.Pawn.Address + Offset.Pawn.pClippingWeapon, CurrentWeapon) || CurrentWeapon == 0)
+    const DWORD64 CurrentWeapon = LocalEntity.Pawn.GetActiveWeaponAddress();
+    if (CurrentWeapon == 0)
         return "";
 
     // Calculate the final address for weapon index directly

@@ -3,39 +3,6 @@
 #include "View.h"
 #include "Bone.h"
 #include "../Core/Globals.h"
-#include <map>
-#include <tuple>
-#include <type_traits>
-
-// Batch field descriptor for compile-time automation
-template<typename T>
-struct BatchField {
-	DWORD64 offset;
-	T* target;
-	SIZE_T size = sizeof(T);
-
-	constexpr BatchField(DWORD64 off, T* tgt) : offset(off), target(tgt) {}
-};
-
-// Conditional field for dependent reads
-template<typename T>
-struct ConditionalField {
-	DWORD64 baseAddr;
-	DWORD64 offset;
-	T* target;
-	SIZE_T size = sizeof(T);
-	T defaultValue;
-
-	ConditionalField(DWORD64 base, DWORD64 off, T* tgt, T def = T{})
-		: baseAddr(base), offset(off), target(tgt), defaultValue(def) {
-	}
-};
-
-struct C_UTL_VECTOR
-{
-	DWORD64 Count = 0;
-	DWORD64 Data = 0;
-};
 
 class PlayerController
 {
@@ -85,8 +52,7 @@ public:
 	std::string WeaponName;
 	DWORD ShotsFired;
 	DWORD GameSceneNode;
-	Vec2 AimPunchAngle;
-	C_UTL_VECTOR AimPunchCache;
+	Vec2 AimPunchAngle{};
 	int Health;
 	int Ammo;
 	//int MaxAmmo;
@@ -102,6 +68,7 @@ public:
 	bool GetPos();
 	bool GetViewAngle();
 	bool GetCameraPos();
+	DWORD64 GetActiveWeaponAddress() const;
 	bool GetWeaponName();
 	bool GetShotsFired();
 	bool GetAimPunchAngle();
@@ -110,7 +77,6 @@ public:
 	bool GetFov();
 	bool GetSpotted();
 	bool GetFFlags();
-	bool GetAimPunchCache();
 	bool GetAmmo();
 	//bool GetMaxAmmo();
 	bool GetArmor();
@@ -137,44 +103,6 @@ public:
 
 class CEntity
 {
-private:
-
-	// Pre-calculated field descriptors (computed once, reused)
-	static inline auto GetPawnFieldDescriptors(DWORD64 pawnAddr, PlayerPawn& pawn) {
-		return std::make_tuple(
-			BatchField{ Offset.Pawn.angEyeAngles, &pawn.ViewAngle },
-			BatchField{ Offset.Pawn.vecLastClipCameraPos, &pawn.CameraPos },
-			BatchField{ Offset.Pawn.Pos, &pawn.Pos },
-			BatchField{ Offset.Pawn.bSpottedByMask, &pawn.bSpottedByMask },
-			BatchField{ Offset.Pawn.fFlags, &pawn.fFlags },
-			BatchField{ Offset.Pawn.iShotsFired, &pawn.ShotsFired },
-			BatchField{ Offset.Pawn.aimPunchAngle, &pawn.AimPunchAngle },
-			BatchField{ Offset.Pawn.iTeamNum, &pawn.TeamID },
-			BatchField{ Offset.Pawn.CurrentHealth, &pawn.Health },
-			BatchField{ Offset.Pawn.CurrentArmor, &pawn.Armor },
-			BatchField{ Offset.Pawn.flFlashDuration, &pawn.FlashDuration },
-			//BatchField{ Offset.C4.m_bBeingDefused, &pawn.isDefusing },
-			BatchField{ Offset.Pawn.aimPunchCache, &pawn.AimPunchCache },
-			BatchField{ Offset.Pawn.GameSceneNode, &pawn.GameSceneNode }
-		);
-	}
-
-	// Template function to build requests from field descriptors
-	template<typename... Fields>
-	static void BuildRequests(DWORD64 baseAddr, std::vector<std::pair<DWORD64, SIZE_T>>& requests,
-		const std::tuple<Fields...>& fields) {
-		std::apply([&](const auto&... field) {
-			((requests.emplace_back(baseAddr + field.offset, field.size)), ...);
-			}, fields);
-	}
-
-	// Template function to extract data from buffer
-	template<typename... Fields>
-	static void ExtractData(const BYTE* buffer, SIZE_T& offset, const std::tuple<Fields...>& fields) {
-		std::apply([&](const auto&... field) {
-			((memcpy(field.target, buffer + offset, field.size), offset += field.size), ...);
-			}, fields);
-	}
 
 public:
 	PlayerController Controller;
@@ -217,17 +145,24 @@ private:
 	std::vector<std::pair<DWORD64, SIZE_T>> allRequests;
 	std::vector<BYTE> masterBuffer;
 
-	// Phase 1: Controller + Core Pawn data
+	// Phase 1: Controller + core pawn data
 	bool ProcessCoreEntityData(std::vector<std::pair<int, CEntity>>& entities,
-		std::vector<DWORD64>& weaponAddresses,
+		std::vector<DWORD64>& weaponServiceAddresses,
+		std::vector<DWORD64>& aimPunchServiceAddresses,
 		std::vector<DWORD64>& cameraAddresses);
 
-	// Phase 2: Weapon data
+	// Phase 2: Pointer-dependent pawn data
+	bool ProcessServiceData(std::vector<std::pair<int, CEntity>>& entities,
+		const std::vector<DWORD64>& weaponServiceAddresses,
+		const std::vector<DWORD64>& aimPunchServiceAddresses,
+		std::vector<DWORD64>& weaponAddresses);
+
+	// Phase 3: Weapon data
 	bool ProcessWeaponData(std::vector<std::pair<int, CEntity>>& entities,
 		const std::vector<DWORD64>& weaponAddresses,
 		std::vector<DWORD64>& weaponDataAddresses);
 
-	// Phase 3: Final dependent data
+	// Phase 4: Final dependent data
 	bool ProcessDependenciesData(std::vector<std::pair<int, CEntity>>& entities,
 		const std::vector<DWORD64>& weaponDataAddresses,
 		const std::vector<DWORD64>& cameraAddresses);

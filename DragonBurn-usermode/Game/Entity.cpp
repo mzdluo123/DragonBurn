@@ -112,8 +112,6 @@ bool CEntity::UpdatePawn(const DWORD64& PlayerPawnAddress)
 		return false;
 	if (!this->Pawn.GetVelocity())
 		return false;
-	if (!this->Pawn.GetAimPunchCache())//
-		return false;
 	if (!this->Pawn.BoneData.UpdateAllBoneData(PlayerPawnAddress))//
 		return false;
 
@@ -173,7 +171,7 @@ bool PlayerPawn::GetViewAngle()
 
 bool PlayerPawn::GetCameraPos()
 {
-	return GetDataAddressWithOffset<Vec3>(Address, Offset.Pawn.vecLastClipCameraPos, this->CameraPos);
+	return GetDataAddressWithOffset<Vec3>(Address, Offset.Pawn.LastCameraSetupLocalOrigin, this->CameraPos);
 }
 
 bool PlayerPawn::GetSpotted()
@@ -186,11 +184,24 @@ bool PlayerPawn::GetFFlags()
 	return GetDataAddressWithOffset<int>(Address, Offset.Pawn.fFlags, this->fFlags);
 }
 
+DWORD64 PlayerPawn::GetActiveWeaponAddress() const
+{
+	DWORD64 weaponServices = 0;
+	if (!memoryManager.ReadMemory(Address + Offset.Pawn.m_pWeaponServices, weaponServices) || weaponServices == 0)
+		return 0;
+
+	DWORD activeWeaponHandle = 0;
+	if (!memoryManager.ReadMemory(weaponServices + Offset.WeaponBaseData.hActiveWeapon, activeWeaponHandle) ||
+		activeWeaponHandle == 0 || activeWeaponHandle == 0xFFFFFFFF)
+		return 0;
+
+	return CEntity::ResolveEntityHandle(activeWeaponHandle);
+}
+
 bool PlayerPawn::GetWeaponName()
 {
-	// Single memory read to get the weapon pointer
-	DWORD64 CurrentWeapon;
-	if (!memoryManager.ReadMemory(this->Address + Offset.Pawn.pClippingWeapon, CurrentWeapon) || CurrentWeapon == 0)
+	const DWORD64 CurrentWeapon = GetActiveWeaponAddress();
+	if (CurrentWeapon == 0)
 		return false;
 
 	// Calculate the final address for weapon index directly
@@ -217,7 +228,11 @@ bool PlayerPawn::GetShotsFired()
 
 bool PlayerPawn::GetAimPunchAngle()
 {
-	return GetDataAddressWithOffset<Vec2>(Address, Offset.Pawn.aimPunchAngle, this->AimPunchAngle);
+	DWORD64 aimPunchServices = 0;
+	if (!memoryManager.ReadMemory(Address + Offset.Pawn.AimPunchServices, aimPunchServices) || aimPunchServices == 0)
+		return false;
+
+	return GetDataAddressWithOffset<Vec2>(aimPunchServices, Offset.Pawn.PredictableAimPunchAngle, this->AimPunchAngle);
 }
 
 bool PlayerPawn::GetTeamID()
@@ -225,10 +240,6 @@ bool PlayerPawn::GetTeamID()
 	return GetDataAddressWithOffset<int>(Address, Offset.Pawn.iTeamNum, this->TeamID);
 }
 
-bool PlayerPawn::GetAimPunchCache()
-{
-	return GetDataAddressWithOffset<C_UTL_VECTOR>(Address, Offset.Pawn.aimPunchCache, this->AimPunchCache);
-}
 
 DWORD64 PlayerController::GetPlayerPawnAddress()
 {
@@ -283,25 +294,13 @@ bool PlayerPawn::GetArmor()
 
 bool PlayerPawn::GetAmmo()
 {
-	DWORD64 ClippingWeapon = 0;
-	if (!memoryManager.ReadMemory<DWORD64>(Address + Offset.Pawn.pClippingWeapon, ClippingWeapon))
+	const DWORD64 CurrentWeapon = GetActiveWeaponAddress();
+	if (CurrentWeapon == 0)
 		return false;
 
-	return GetDataAddressWithOffset<int>(ClippingWeapon, Offset.WeaponBaseData.Clip1, this->Ammo);
+	return GetDataAddressWithOffset<int>(CurrentWeapon, Offset.WeaponBaseData.Clip1, this->Ammo);
 }
 
-//bool PlayerPawn::GetMaxAmmo()
-//{
-//	DWORD64 ClippingWeapon = 0;
-//	DWORD64 WeaponData = 0;
-//	if (!memoryManager.ReadMemory<DWORD64>(Address + Offset.Pawn.pClippingWeapon, ClippingWeapon))
-//		return false;
-//	if (!memoryManager.ReadMemory<DWORD64>(ClippingWeapon + Offset.WeaponBaseData.WeaponDataPTR, WeaponData))
-//		return false;
-//
-//	return GetDataAddressWithOffset<int>(WeaponData, Offset.WeaponBaseData.MaxClip, this->MaxAmmo);
-//}
-//
 bool PlayerPawn::GetFov()
 {
 	DWORD64 CameraServices = 0;
@@ -474,23 +473,29 @@ bool EntityBatchProcessor::ProcessAllEntities(
 		entities.emplace_back(data.entityIndex, std::move(entity));
 	}
 
+	std::vector<DWORD64> weaponServiceAddresses, aimPunchServiceAddresses;
 	std::vector<DWORD64> weaponAddresses, cameraAddresses, weaponDataAddresses;
 
 	// Phase 1: Controller + Core Pawn Data
-	if (!ProcessCoreEntityData(entities, weaponAddresses, cameraAddresses)) {
+	if (!ProcessCoreEntityData(entities, weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses)) {
 		return false;
 	}
 
-	// Phase 2: Weapon Data
+	// Phase 2: Pointer-dependent Pawn Data
+	if (!ProcessServiceData(entities, weaponServiceAddresses, aimPunchServiceAddresses, weaponAddresses)) {
+		return false;
+	}
+
+	// Phase 3: Weapon Data
 	if (!ProcessWeaponData(entities, weaponAddresses, weaponDataAddresses)) {
 		return false;
 	}
 
-	// Phase 3: Final Dependent Data
+	// Phase 4: Final Dependent Data
 	if (!ProcessDependenciesData(entities, weaponDataAddresses, cameraAddresses)) {
 		return false;
 	}
-	// Phase 4: Bone Data (process individually for now)
+	// Phase 5: Bone Data (process individually for now)
 	for (auto& [entityIndex, entity] : entities) {
 
 		if (entity.Pawn.Address != 0) {
@@ -503,11 +508,12 @@ bool EntityBatchProcessor::ProcessAllEntities(
 
 bool EntityBatchProcessor::ProcessCoreEntityData(
 	std::vector<std::pair<int, CEntity>>& entities,
-	std::vector<DWORD64>& weaponAddresses,
+	std::vector<DWORD64>& weaponServiceAddresses,
+	std::vector<DWORD64>& aimPunchServiceAddresses,
 	std::vector<DWORD64>& cameraAddresses) {
 
 	std::vector<std::pair<DWORD64, SIZE_T>> requests;
-	requests.reserve(entities.size() * 21); // 6 controller + 15 pawn = 22 per entity
+	requests.reserve(entities.size() * 20); // 6 controller + 14 pawn fields per entity
 
 	// Build all requests for Phase 1
 	for (const auto& [entityIndex, entity] : entities) {
@@ -522,21 +528,19 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 
 		// ALL pawn requests for this entity
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.angEyeAngles, sizeof(Vec2));
-		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.vecLastClipCameraPos, sizeof(Vec3));
+		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.LastCameraSetupLocalOrigin, sizeof(Vec3));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.Pos, sizeof(Vec3));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.bSpottedByMask, sizeof(DWORD64));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.fFlags, sizeof(int));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.iShotsFired, sizeof(DWORD));
-		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.aimPunchAngle, sizeof(Vec2));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.iTeamNum, sizeof(int));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.CurrentHealth, sizeof(int));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.CurrentArmor, sizeof(int));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.flFlashDuration, sizeof(float));
-		//requests.emplace_back(entity.Pawn.Address + Offset.C4.m_bBeingDefused, sizeof(bool));
-		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.aimPunchCache, sizeof(C_UTL_VECTOR));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.AbsVelocity, sizeof(Vec3));
-		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.pClippingWeapon, sizeof(DWORD64));
+		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.m_pWeaponServices, sizeof(DWORD64));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.CameraServices, sizeof(DWORD64));
+		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.AimPunchServices, sizeof(DWORD64));
 	}
 
 	// Calculate total buffer size
@@ -550,17 +554,13 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		return false;
 	}
 
-	weaponAddresses.clear();
+	weaponServiceAddresses.clear();
+	aimPunchServiceAddresses.clear();
 	cameraAddresses.clear();
-	weaponAddresses.reserve(entities.size());
+	weaponServiceAddresses.reserve(entities.size());
+	aimPunchServiceAddresses.reserve(entities.size());
 	cameraAddresses.reserve(entities.size());
 
-	// Calculate per-entity data size
-	const SIZE_T CONTROLLER_DATA_SIZE = sizeof(int) * 3 + MAX_PATH + sizeof(INT64) + sizeof(DWORD);// if u adding new controller field to read add its size here
-
-	const SIZE_T PAWN_DATA_SIZE = sizeof(Vec2) * 2 + sizeof(Vec3) * 3 + sizeof(DWORD64) * 3 +
-		sizeof(DWORD) + sizeof(int) * 4 + sizeof(float) + sizeof(C_UTL_VECTOR); // if u adding new pawn field to read add its size here
-	const SIZE_T ENTITY_DATA_SIZE = CONTROLLER_DATA_SIZE + PAWN_DATA_SIZE;
 
 	SIZE_T currentOffset = 0;
 
@@ -612,9 +612,6 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		memcpy(&entity.Pawn.ShotsFired, buffer.data() + currentOffset, sizeof(DWORD));
 		currentOffset += sizeof(DWORD);
 
-		memcpy(&entity.Pawn.AimPunchAngle, buffer.data() + currentOffset, sizeof(Vec2));
-		currentOffset += sizeof(Vec2);
-
 		memcpy(&entity.Pawn.TeamID, buffer.data() + currentOffset, sizeof(int));
 		currentOffset += sizeof(int);
 
@@ -630,25 +627,83 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		//memcpy(&entity.Pawn.isDefusing, buffer.data() + currentOffset, sizeof(bool));
 		//currentOffset += sizeof(bool);
 
-		memcpy(&entity.Pawn.AimPunchCache, buffer.data() + currentOffset, sizeof(C_UTL_VECTOR));
-		currentOffset += sizeof(C_UTL_VECTOR);
-
 		// Calculate velocity
 		Vec3 velocity;
 		memcpy(&velocity, buffer.data() + currentOffset, sizeof(Vec3));
 		entity.Pawn.Speed = sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
 		currentOffset += sizeof(Vec3);
 
-		// Extract dependent addresses
-		DWORD64 weaponAddr, cameraAddr;
-		memcpy(&weaponAddr, buffer.data() + currentOffset, sizeof(DWORD64));
+		// Extract dependent service addresses
+		DWORD64 weaponServiceAddr, cameraAddr, aimPunchServiceAddr;
+		memcpy(&weaponServiceAddr, buffer.data() + currentOffset, sizeof(DWORD64));
 		currentOffset += sizeof(DWORD64);
 
 		memcpy(&cameraAddr, buffer.data() + currentOffset, sizeof(DWORD64));
 		currentOffset += sizeof(DWORD64);
 
-		weaponAddresses.push_back(weaponAddr);
+		memcpy(&aimPunchServiceAddr, buffer.data() + currentOffset, sizeof(DWORD64));
+		currentOffset += sizeof(DWORD64);
+
+		weaponServiceAddresses.push_back(weaponServiceAddr);
+		aimPunchServiceAddresses.push_back(aimPunchServiceAddr);
 		cameraAddresses.push_back(cameraAddr);
+	}
+
+	return true;
+}
+
+bool EntityBatchProcessor::ProcessServiceData(
+	std::vector<std::pair<int, CEntity>>& entities,
+	const std::vector<DWORD64>& weaponServiceAddresses,
+	const std::vector<DWORD64>& aimPunchServiceAddresses,
+	std::vector<DWORD64>& weaponAddresses) {
+
+	std::vector<std::pair<DWORD64, SIZE_T>> requests;
+	std::vector<std::pair<size_t, bool>> requestMap; // entity index, active weapon request
+	requests.reserve(entities.size() * 2);
+	requestMap.reserve(entities.size() * 2);
+	weaponAddresses.assign(entities.size(), 0);
+
+	for (size_t i = 0; i < entities.size(); ++i) {
+		entities[i].second.Pawn.AimPunchAngle = Vec2();
+
+		if (weaponServiceAddresses[i] != 0) {
+			requests.emplace_back(weaponServiceAddresses[i] + Offset.WeaponBaseData.hActiveWeapon, sizeof(DWORD));
+			requestMap.emplace_back(i, true);
+		}
+
+		if (aimPunchServiceAddresses[i] != 0) {
+			requests.emplace_back(aimPunchServiceAddresses[i] + Offset.Pawn.PredictableAimPunchAngle, sizeof(Vec2));
+			requestMap.emplace_back(i, false);
+		}
+	}
+
+	if (requests.empty())
+		return true;
+
+	SIZE_T totalSize = 0;
+	for (const auto& request : requests)
+		totalSize += request.second;
+
+	std::vector<BYTE> buffer(totalSize);
+	if (!memoryManager.BatchReadMemory(requests, buffer.data()))
+		return false;
+
+	SIZE_T bufferOffset = 0;
+	for (const auto& [entityIndex, isActiveWeapon] : requestMap) {
+		if (isActiveWeapon) {
+			DWORD activeWeaponHandle = 0;
+			memcpy(&activeWeaponHandle, buffer.data() + bufferOffset, sizeof(DWORD));
+			bufferOffset += sizeof(DWORD);
+
+			if (activeWeaponHandle != 0 && activeWeaponHandle != 0xFFFFFFFF)
+				weaponAddresses[entityIndex] = CEntity::ResolveEntityHandle(activeWeaponHandle);
+		}
+		else {
+			memcpy(&entities[entityIndex].second.Pawn.AimPunchAngle,
+				buffer.data() + bufferOffset, sizeof(Vec2));
+			bufferOffset += sizeof(Vec2);
+		}
 	}
 
 	return true;

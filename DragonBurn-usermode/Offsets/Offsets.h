@@ -43,7 +43,7 @@ public:
 	{
 		DWORD BulletServices;
 		DWORD CameraServices;
-		DWORD pClippingWeapon;
+		DWORD AimPunchServices;
 
 		DWORD isScoped;
 		DWORD isDefusing;
@@ -55,11 +55,10 @@ public:
 		DWORD GameSceneNode;
 		DWORD BoneArray;
 		DWORD angEyeAngles;
-		DWORD vecLastClipCameraPos;
+		DWORD LastCameraSetupLocalOrigin;
 		DWORD iShotsFired;
 		DWORD flFlashDuration;
-		DWORD aimPunchAngle;
-		DWORD aimPunchCache;
+		DWORD PredictableAimPunchAngle;
 		DWORD iIDEntIndex;
 		DWORD iTeamNum;
 		DWORD iFovStart;
@@ -114,6 +113,7 @@ public:
 		DWORD Item;
 		DWORD ItemDefinitionIndex;
 		DWORD hMyWeapons;
+		DWORD hActiveWeapon;
 	} WeaponBaseData;
 
 	struct

@@ -13,19 +13,13 @@ void Offsets::SetOffsets(const std::string& offsetsData, const std::string& butt
         json buttonsJson = json::parse(buttonsData);
         json client_dllJson = json::parse(client_dllData)["client.dll"]["classes"];
 
-        auto get_offset = [&](json& j, const std::string& key) -> DWORD {
-            if (j.contains(key) && !j[key].is_null())
-                return j[key].get<DWORD>();
-            return 0;
-        };
-
         auto get_class_field = [&](const std::string& className, const std::string& fieldName) -> DWORD {
             if (client_dllJson.contains(className) && 
                 client_dllJson[className].contains("fields") && 
                 client_dllJson[className]["fields"].contains(fieldName)) {
                 return client_dllJson[className]["fields"][fieldName].get<DWORD>();
             }
-            return 0;
+            throw std::runtime_error("Missing offset: " + className + "." + fieldName);
         };
 
         this->EntityList = offsetsJson["client.dll"]["dwEntityList"];
@@ -50,7 +44,7 @@ void Offsets::SetOffsets(const std::string& offsetsData, const std::string& butt
 
         this->Pawn.BulletServices = get_class_field("C_CSPlayerPawn", "m_pBulletServices");
         this->Pawn.CameraServices = get_class_field("C_BasePlayerPawn", "m_pCameraServices");
-        this->Pawn.pClippingWeapon = get_class_field("C_CSPlayerPawn", "m_pClippingWeapon");
+        this->Pawn.AimPunchServices = get_class_field("C_CSPlayerPawn", "m_pAimPunchServices");
         this->Pawn.isScoped = get_class_field("C_CSPlayerPawn", "m_bIsScoped");
         this->Pawn.isDefusing = get_class_field("C_CSPlayerPawn", "m_bIsDefusing");
         this->Pawn.TotalHit = get_class_field("CCSPlayer_BulletServices", "m_totalHitsOnServer");
@@ -61,11 +55,10 @@ void Offsets::SetOffsets(const std::string& offsetsData, const std::string& butt
         this->Pawn.GameSceneNode = get_class_field("C_BaseEntity", "m_pGameSceneNode");
         this->Pawn.BoneArray = get_class_field("CSkeletonInstance", "m_modelState") + 0x80;
         this->Pawn.angEyeAngles = get_class_field("C_CSPlayerPawn", "m_angEyeAngles");
-        this->Pawn.vecLastClipCameraPos = get_class_field("C_CSPlayerPawn", "m_vecLastClipCameraPos");
+        this->Pawn.LastCameraSetupLocalOrigin = get_class_field("C_BasePlayerPawn", "m_vecLastCameraSetupLocalOrigin");
         this->Pawn.iShotsFired = get_class_field("C_CSPlayerPawn", "m_iShotsFired");
         this->Pawn.flFlashDuration = get_class_field("C_CSPlayerPawnBase", "m_flFlashDuration");
-        this->Pawn.aimPunchAngle = get_class_field("C_CSPlayerPawn", "m_aimPunchAngle");
-        this->Pawn.aimPunchCache = get_class_field("C_CSPlayerPawn", "m_aimPunchCache");
+        this->Pawn.PredictableAimPunchAngle = get_class_field("CCSPlayer_AimPunchServices", "m_predictableBaseAngle");
         this->Pawn.iIDEntIndex = get_class_field("C_CSPlayerPawn", "m_iIDEntIndex");
         this->Pawn.iTeamNum = get_class_field("C_BaseEntity", "m_iTeamNum");
         this->Pawn.iFovStart = get_class_field("CCSPlayerBase_CameraServices", "m_iFOVStart");
@@ -107,6 +100,7 @@ void Offsets::SetOffsets(const std::string& offsetsData, const std::string& butt
         this->WeaponBaseData.Item = get_class_field("C_AttributeContainer", "m_Item");
         this->WeaponBaseData.ItemDefinitionIndex = get_class_field("C_EconItemView", "m_iItemDefinitionIndex");
         this->WeaponBaseData.hMyWeapons = get_class_field("CPlayer_WeaponServices", "m_hMyWeapons");
+        this->WeaponBaseData.hActiveWeapon = get_class_field("CPlayer_WeaponServices", "m_hActiveWeapon");
 
         this->C4.m_bBeingDefused = get_class_field("C_PlantedC4", "m_bBeingDefused");
         this->C4.m_flDefuseCountDown = get_class_field("C_PlantedC4", "m_flDefuseCountDown");
@@ -114,6 +108,7 @@ void Offsets::SetOffsets(const std::string& offsetsData, const std::string& butt
     }
     catch (const std::exception& e) {
         std::cout << "[X] Offset parsing error: " << e.what() << std::endl;
+        throw;
     }
 }
 
@@ -171,7 +166,7 @@ void Offsets::UpdateOffsets()
         storage::WriteStorageFile("buttons.json", buttons);
         storage::WriteStorageFile("client_dll.json", client_dll);
         
-        std::cout << "[+] Offsets updated successfully" << std::endl;
     }
     SetOffsets(offsets, buttons, client_dll);
+    std::cout << "[+] Offsets updated successfully" << std::endl;
 }
