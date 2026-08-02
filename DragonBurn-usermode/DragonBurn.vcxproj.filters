@@ -195,11 +195,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="Resources\icon.ico">
-      <Filter>Resources</Filter>
-    </Image>
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OS-ImGui\OS-ImGui_External.cpp">
       <Filter>ImGui</Filter>

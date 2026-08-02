@@ -50,7 +50,7 @@
     <RunCodeAnalysis>false</RunCodeAnalysis>
     <IncludePath>Libs\json</IncludePath>
     <ExternalIncludePath>$(ExternalIncludePath)</ExternalIncludePath>
-    <TargetName>DragonBurn-usermode</TargetName>
+    <TargetName>VoidSpectre</TargetName>
     <LibraryPath>$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -59,7 +59,7 @@
     <RunCodeAnalysis>false</RunCodeAnalysis>
     <IncludePath>Libs\json</IncludePath>
     <ExternalIncludePath>$(ExternalIncludePath)</ExternalIncludePath>
-    <TargetName>DragonBurn-usermode</TargetName>
+    <TargetName>VoidSpectre</TargetName>
     <LibraryPath>$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -150,9 +150,6 @@
     <ClInclude Include="Resources\Sounds.h" />
     <ClInclude Include="Resources\WeaponIcon.h" />
     <ClInclude Include="Helpers\StorageMgr.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Image Include="Resources\icon.ico" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Config\ConfigMenu.cpp" />

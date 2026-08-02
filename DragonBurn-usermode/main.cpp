@@ -136,7 +136,7 @@ CONNECT_KERNEL:
 		Log::Info("Triggered auto-map protocol");
 		Log::Info("Looking for kernel mapper...");
 
-		if (fs::exists("DragonBurn-kernel.exe"))
+		if (fs::exists("VoidSpectre-Mapper.exe"))
 		{
 			Log::PreviousLine();
 			std::string mapperInfo = "Executing kernel mapper, flags: "

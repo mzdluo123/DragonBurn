@@ -46,12 +46,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)\built\</OutDir>
     <IntDir>$(SolutionDir)\built\cache\cc</IntDir>
-    <TargetName>Crypto</TargetName>
+    <TargetName>VoidSpectre-Crypto</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)\built_dbg\</OutDir>
     <IntDir>$(SolutionDir)\built_dbg\cache\cc</IntDir>
-    <TargetName>Crypto</TargetName>
+    <TargetName>VoidSpectre-Crypto</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>

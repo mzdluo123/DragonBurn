@@ -56,7 +56,7 @@ namespace Init
             startupInfo.dwFlags = STARTF_USESHOWWINDOW;
             startupInfo.wShowWindow = SW_SHOW;
 
-            std::wstring commandLine = L"DragonBurn-kernel.exe"
+            std::wstring commandLine = L"VoidSpectre-Mapper.exe"
                 + std::wstring(secureMode ? L" --securemode" : L"")
                 + std::wstring(legacyImg ? L" --legacyimg" : L"")
                 + std::wstring(forceprefs ? L" --forceprefs" : L"");

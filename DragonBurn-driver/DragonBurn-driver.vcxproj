@@ -44,7 +44,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)\built_dbg\</OutDir>
     <IntDir>$(SolutionDir)\built_dbg\cache\driver\</IntDir>
-    <TargetName>DragonBurn-kmd</TargetName>
+    <TargetName>VoidSpectre-Core</TargetName>
     <TargetExt>.sys</TargetExt>
     <GenerateManifest>false</GenerateManifest>
     <EmbedManifest>false</EmbedManifest>
@@ -53,7 +53,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)\built\</OutDir>
     <IntDir>$(SolutionDir)\built\cache\driver\</IntDir>
-    <TargetName>DragonBurn-kmd</TargetName>
+    <TargetName>VoidSpectre-Core</TargetName>
     <TargetExt>.sys</TargetExt>
     <GenerateManifest>false</GenerateManifest>
     <EmbedManifest>false</EmbedManifest>

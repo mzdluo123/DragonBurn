@@ -141,21 +141,21 @@ cmake --build build --config Release --parallel
 
 Use `--config Debug` for a debug build. CMake builds the user-mode client and mapper directly, and invokes the WDK `.vcxproj` for the kernel driver. It writes the following three Release outputs to `built/` (`built_dbg/` for Debug):
 
-- `DragonBurn-usermode.exe`
-- `DragonBurn-kernel.exe`
-- `DragonBurn-kmd.sys`
+- `VoidSpectre.exe`
+- `VoidSpectre-Mapper.exe`
+- `VoidSpectre-Core.sys`
 
-Run `DragonBurn-usermode.exe` as administrator. It derives the host-specific device path (`\\.\<32 hexadecimal characters>`) from the active computer name, connects to it, and, if unavailable, launches `DragonBurn-kernel.exe`, waits for the mapper to finish, and reconnects automatically.
+Run `VoidSpectre.exe` as administrator. It derives the host-specific device path (`\\.\<32 hexadecimal characters>`) from the active computer name, connects to it, and, if unavailable, launches `VoidSpectre-Mapper.exe`, waits for the mapper to finish, and reconnects automatically.
 
-The mapper restores the original Intel vulnerable-driver loading flow. When `cfg::image` is empty, it reads `DragonBurn-kmd.sys` from its own directory. Embedded and encrypted `cfg::image` data remains supported.
+The mapper restores the original Intel vulnerable-driver loading flow. When `cfg::image` is empty, it reads `VoidSpectre-Core.sys` from its own directory. Embedded and encrypted `cfg::image` data remains supported.
 
 Supported user-mode flags are forwarded to the mapper:
 
 - `--securemode`: allocate independent pages and apply per-section protection.
-- `--legacyimg`: use embedded `cfg::imageLegacy`, or `DragonBurn-kmd-legacy.sys` beside the mapper.
+- `--legacyimg`: use embedded `cfg::imageLegacy`, or `VoidSpectre-Core-legacy.sys` beside the mapper.
 - `--forceprefs`: force the original Windows kernel-preference prompt.
 
-`DragonBurn-kmd.sys` supports both entry paths: normal Service Control Manager loading and kdmapper-style invocation with null `DriverObject`/`RegistryPath` parameters. Both paths derive the same case-insensitive host-specific token before registering the driver object, device, symbolic link, and IOCTL dispatch table. The device ACL continues to grant access only to SYSTEM and administrators.
+`VoidSpectre-Core.sys` supports both entry paths: normal Service Control Manager loading and kdmapper-style invocation with null `DriverObject`/`RegistryPath` parameters. Both paths derive the same case-insensitive host-specific token before registering the driver object, device, symbolic link, and IOCTL dispatch table. The device ACL continues to grant access only to SYSTEM and administrators.
 
 ---
 
@@ -163,7 +163,7 @@ Supported user-mode flags are forwarded to the mapper:
 
 > Error: `Failed to read driver image from the mapper directory`.
 >
-> Solution: Place `DragonBurn-kmd.sys` next to `DragonBurn-kernel.exe`. For `--legacyimg`, provide `DragonBurn-kmd-legacy.sys` or populate `cfg::imageLegacy`.
+> Solution: Place `VoidSpectre-Core.sys` next to `VoidSpectre-Mapper.exe`. For `--legacyimg`, provide `VoidSpectre-Core-legacy.sys` or populate `cfg::imageLegacy`.
 
 > Error: `Failed to connect to intel driver`.
 >

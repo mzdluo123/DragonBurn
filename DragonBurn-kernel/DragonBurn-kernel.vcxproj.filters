@@ -31,7 +31,4 @@
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />
   </ItemGroup>
-  <ItemGroup>
-    <Image Include="icon.ico" />
-  </ItemGroup>
 </Project>

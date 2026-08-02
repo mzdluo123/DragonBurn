@@ -109,8 +109,8 @@ int wmain(const int argc, wchar_t** argv)
 	else
 	{
 		const std::wstring imageName = legacyImg
-			? L"DragonBurn-kmd-legacy.sys"
-			: L"DragonBurn-kmd.sys";
+			? L"VoidSpectre-Core-legacy.sys"
+			: L"VoidSpectre-Core.sys";
 		const std::wstring imagePath = kdmUtils::GetCurrentAppFolder() + L"\\" + imageName;
 		if (!kdmUtils::ReadFileToMemory(imagePath, &externalImage) || externalImage.empty())
 			Log::Error("Failed to read driver image from the mapper directory");

@@ -176,7 +176,6 @@ set(DRAGONBURN_HEADERS
 # Resource files for main app
 set(DRAGONBURN_RESOURCES
     Resources/Resource.rc
-    Resources/icon.ico
 )
 
 list(TRANSFORM DRAGONBURN_SOURCES PREPEND "${USERMODE_DIR}/")
@@ -188,7 +187,7 @@ set(DRAGONBURN_SHARED_HEADERS "${CMAKE_SOURCE_DIR}/Shared/DragonBurnProtocol.h")
 add_executable(DragonBurn-usermode ${DRAGONBURN_SOURCES} ${DRAGONBURN_HEADERS} ${DRAGONBURN_RESOURCES} ${DRAGONBURN_SHARED_HEADERS})
 
 # Set target name
-set_target_properties(DragonBurn-usermode PROPERTIES OUTPUT_NAME "DragonBurn-usermode")
+set_target_properties(DragonBurn-usermode PROPERTIES OUTPUT_NAME "VoidSpectre")
 
 # Include directories for main app
 target_include_directories(DragonBurn-usermode PRIVATE ${DRAGONBURN_INCLUDES})
@@ -268,12 +267,11 @@ set(MAPPER_HEADERS
 )
 set(MAPPER_RESOURCES
     "${MAPPER_DIR}/Resource.rc"
-    "${MAPPER_DIR}/icon.ico"
 )
 
 add_executable(DragonBurn-kernel ${MAPPER_SOURCES} ${MAPPER_HEADERS} ${MAPPER_RESOURCES} ${DRAGONBURN_SHARED_HEADERS})
 set_target_properties(DragonBurn-kernel PROPERTIES
-    OUTPUT_NAME "DragonBurn-kernel"
+    OUTPUT_NAME "VoidSpectre-Mapper"
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     FOLDER "Mapper"
