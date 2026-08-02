@@ -11,6 +11,10 @@ extern "C" NTSTATUS NTAPI ZwQuerySystemInformation(
 
 extern "C" PVOID NTAPI PsGetProcessPeb(PEPROCESS process);
 
+#ifndef MM_COPY_MEMORY_VIRTUAL
+#define MM_COPY_MEMORY_VIRTUAL 0x1
+#endif
+
 extern "C" NTSTATUS NTAPI IoCreateDriver(
     PUNICODE_STRING driverName,
     PDRIVER_INITIALIZE initializationFunction);
@@ -197,19 +201,21 @@ namespace
         if (destination == nullptr || !IsValidUserRange(sourceAddress, size))
             return STATUS_INVALID_PARAMETER;
 
-        NTSTATUS status = STATUS_SUCCESS;
-        __try
-        {
-            const void* source = reinterpret_cast<const void*>(sourceAddress);
-            ProbeForRead(const_cast<void*>(source), size, 1);
-            RtlCopyMemory(destination, source, size);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            status = GetExceptionCode();
-        }
+        MM_COPY_ADDRESS source{};
+        source.VirtualAddress = reinterpret_cast<void*>(sourceAddress);
 
-        return status;
+        SIZE_T bytesCopied = 0;
+        const NTSTATUS status = MmCopyMemory(
+            destination,
+            source,
+            size,
+            MM_COPY_MEMORY_VIRTUAL,
+            &bytesCopied);
+
+        if (!NT_SUCCESS(status))
+            return status;
+
+        return bytesCopied == size ? STATUS_SUCCESS : STATUS_PARTIAL_COPY;
     }
 
     NTSTATUS CopyFromProcess(
