@@ -124,16 +124,55 @@ namespace Init
         //    return gameVersion;
         //}
 
-        static bool isGameWindowActive() {
-            HWND hwnd_cs2 = FindWindow(NULL, TEXT("Counter-Strike 2"));
+        static HWND FindGameWindow(DWORD processId)
+        {
+            struct SearchContext
+            {
+                DWORD processId;
+                HWND window;
+            } context{ processId, nullptr };
 
-            if (hwnd_cs2 != NULL) {
-                HWND foreground_window = GetForegroundWindow();
-                if (foreground_window == hwnd_cs2) {
-                    return true;
+            EnumWindows([](HWND window, LPARAM parameter) -> BOOL
+            {
+                auto* context = reinterpret_cast<SearchContext*>(parameter);
+                DWORD windowProcessId = 0;
+                GetWindowThreadProcessId(window, &windowProcessId);
+                if (windowProcessId != context->processId || !IsWindowVisible(window) ||
+                    GetWindow(window, GW_OWNER) != nullptr)
+                {
+                    return TRUE;
                 }
-            }
-            return false;
+
+                char className[64]{};
+                if (GetClassNameA(window, className, static_cast<int>(sizeof(className))) == 0 ||
+                    lstrcmpiA(className, "SDL_app") != 0)
+                {
+                    return TRUE;
+                }
+
+                context->window = window;
+                return FALSE;
+            }, reinterpret_cast<LPARAM>(&context));
+
+            gameProcessId = processId;
+            gameWindow = context.window;
+            return gameWindow;
+        }
+
+        static HWND GetGameWindow()
+        {
+            if (!IsWindow(gameWindow) && gameProcessId != 0)
+                FindGameWindow(gameProcessId);
+            return IsWindow(gameWindow) ? gameWindow : nullptr;
+        }
+
+        inline static DWORD gameProcessId = 0;
+        inline static HWND gameWindow = nullptr;
+
+        static bool isGameWindowActive()
+        {
+            const HWND activeGameWindow = GetGameWindow();
+            return activeGameWindow != nullptr && GetForegroundWindow() == activeGameWindow;
         }
 
         static void Exit()

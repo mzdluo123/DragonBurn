@@ -6,6 +6,7 @@
 #include <random>
 #include "../Helpers/Logger.h"
 #include "../Core/Cheats.h"
+#include "../Core/Init.h"
 namespace fs = std::filesystem;
 
 namespace System {
@@ -114,10 +115,7 @@ namespace Misc
 		if (!MiscCFG::BunnyHop ||  MenuConfig::ShowMenu || Local.Controller.TeamID == 0)
 			return;
 		
-		HWND hwnd_cs2 = FindWindowA(NULL, "Counter-Strike 2");
-		if (hwnd_cs2 == NULL) {
-			hwnd_cs2 = FindWindowA(NULL, "Counter-Strike 2");
-		}
+		HWND hwnd_cs2 = Init::Client::GetGameWindow();
 
 		//int JumpBtn;
 		//if (!memoryManager.ReadMemory(gGame.GetJumpBtnAddress(), JumpBtn))
@@ -217,7 +215,7 @@ namespace Misc
 
 	void ExecuteCommand(const std::string& Command_Str) noexcept
 	{
-		HWND hwnd_cs2 = FindWindowA(NULL, "Counter-Strike 2");
+		HWND hwnd_cs2 = Init::Client::GetGameWindow();
 		if (!hwnd_cs2) return;
 	
 		COPYDATASTRUCT cds;
@@ -381,7 +379,7 @@ namespace Misc
 	{
 		static bool EnsureForegroundCS2()
 		{
-			HWND hwnd_cs2 = FindWindowA(NULL, "Counter-Strike 2");
+			HWND hwnd_cs2 = Init::Client::GetGameWindow();
 			if (!hwnd_cs2)
 				return false;
 	
@@ -469,7 +467,7 @@ namespace Misc
 			
 			// Define region of interest around CS2 window if available, otherwise center of virtual screen
 			RECT wndRect{};
-			HWND hwnd_cs2_roi = FindWindowA(NULL, "Counter-Strike 2");
+			HWND hwnd_cs2_roi = Init::Client::GetGameWindow();
 			int roiLeft = 0, roiTop = 0, roiRight = screenWidth, roiBottom = screenHeight;
 			if (hwnd_cs2_roi && GetWindowRect(hwnd_cs2_roi, &wndRect))
 			{
@@ -551,7 +549,7 @@ namespace Misc
 		void ClickAcceptButton(int x, int y)
 		{
 			// Bring CS2 window to foreground to ensure click is received
-			HWND hwnd_cs2 = FindWindowA(NULL, "Counter-Strike 2");
+			HWND hwnd_cs2 = Init::Client::GetGameWindow();
 			if (hwnd_cs2)
 				EnsureForegroundCS2();
 	

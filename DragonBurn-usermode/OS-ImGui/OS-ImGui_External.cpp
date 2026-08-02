@@ -139,28 +139,33 @@ namespace OSImGui
 
     void OSImGui_External::AttachAnotherWindow(std::string DestWindowName, std::string DestWindowClassName, std::function<void()> CallBack)
     {
-        if (!CallBack)
-            throw OSException("CallBack is empty");
         if (DestWindowName.empty() && DestWindowClassName.empty())
             throw OSException("DestWindowName and DestWindowClassName are empty");
 
-        // Pre-allocate and use move semantics
+        const char* className = DestWindowClassName.empty() ? nullptr : DestWindowClassName.c_str();
+        const char* windowName = DestWindowName.empty() ? nullptr : DestWindowName.c_str();
+        const HWND destWindowHandle = FindWindowA(className, windowName);
+        if (!destWindowHandle)
+            throw OSException("DestWindow isn't exist");
+
+        DestWindow.Name = std::move(DestWindowName);
+        DestWindow.ClassName = std::move(DestWindowClassName);
+        AttachAnotherWindow(destWindowHandle, std::move(CallBack));
+    }
+
+    void OSImGui_External::AttachAnotherWindow(HWND DestWindowHandle, std::function<void()> CallBack)
+    {
+        if (!CallBack)
+            throw OSException("CallBack is empty");
+        if (!IsWindow(DestWindowHandle))
+            throw OSException("DestWindow isn't exist");
+
         Window.Name = "DragonBurn Kernel";
         Window.wName = StringToWstring(Window.Name);
         Window.ClassName = "WindowClass";
         Window.wClassName = StringToWstring(Window.ClassName);
         Window.BgColor = ImColor(0, 0, 0, 0);
-
-        // Cache the FindWindowA parameters
-        const char* className = DestWindowClassName.empty() ? nullptr : DestWindowClassName.c_str();
-        const char* windowName = DestWindowName.empty() ? nullptr : DestWindowName.c_str();
-
-        DestWindow.hWnd = FindWindowA(className, windowName);
-        if (!DestWindow.hWnd)
-            throw OSException("DestWindow isn't exist");
-
-        DestWindow.Name = std::move(DestWindowName);
-        DestWindow.ClassName = std::move(DestWindowClassName);
+        DestWindow.hWnd = DestWindowHandle;
 
         Type = ATTACH;
         CallBackFn = std::move(CallBack);
@@ -172,13 +177,11 @@ namespace OSImGui
             InitImGui(g_Device.g_pd3dDevice, g_Device.g_pd3dDeviceContext);
         }
         catch (const OSException&) {
-            throw; // Re-throw without copying
+            throw;
         }
 
         RegisterRawInput(Window.hWnd);
-
         g_keyboard_hook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(NULL), 0);
-
         MainLoop();
     }
 
@@ -473,13 +476,17 @@ namespace OSImGui
 
     bool OSImGui_External::UpdateWindowData()
     {
-        // Cache class and window name pointers
-        const char* className = DestWindow.ClassName.empty() ? nullptr : DestWindow.ClassName.c_str();
-        const char* windowName = DestWindow.Name.empty() ? nullptr : DestWindow.Name.c_str();
+        if (!IsWindow(DestWindow.hWnd))
+        {
+            if (DestWindow.Name.empty() && DestWindow.ClassName.empty())
+                return false;
 
-        DestWindow.hWnd = FindWindowA(className, windowName);
-        if (!DestWindow.hWnd)
-            return false;
+            const char* className = DestWindow.ClassName.empty() ? nullptr : DestWindow.ClassName.c_str();
+            const char* windowName = DestWindow.Name.empty() ? nullptr : DestWindow.Name.c_str();
+            DestWindow.hWnd = FindWindowA(className, windowName);
+            if (!DestWindow.hWnd)
+                return false;
+        }
 
         RECT rect;
         POINT point = { 0, 0 };

@@ -165,11 +165,12 @@ CONNECT_KERNEL:
 	}
 
 	Log::Info("Waiting for CS2...");
+	DWORD pid = 0;
 	bool attached = false;
 	do
 	{
 		attached = false;
-		DWORD pid = memoryManager.GetProcessID(L"cs2.exe");
+		pid = memoryManager.GetProcessID(L"cs2.exe");
 		if (pid != 0)
 		{
 			Log::PreviousLine();
@@ -241,9 +242,16 @@ UPDATE_OFFSETS://UPDATE_OFFSETS
 	ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
 
+	HWND gameWindow = Init::Client::FindGameWindow(pid);
+	if (!gameWindow)
+	{
+		Log::Error("Failed to locate the CS2 game window");
+		return;
+	}
+
 	try
 	{
-		Gui.AttachAnotherWindow("Counter-Strike 2", "SDL_app", Cheats::Run);
+		Gui.AttachAnotherWindow(gameWindow, Cheats::Run);
 	}
 	catch (std::exception& error)
 	{
