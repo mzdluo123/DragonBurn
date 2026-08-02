@@ -1,30 +1,125 @@
 #include "RCS.h"
 
-void RCS::UpdateAngles(const CEntity& Local, Vec2& Angles)
+#include "../Core/Config.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
+
+namespace
 {
-	Angles = Local.Pawn.ShotsFired == 0 ? Vec2{} : Local.Pawn.AimPunchAngle;
+	constexpr float MouseDegreesPerCount = 0.022f;
+
+	struct RuntimeState
+	{
+		Vec2 previousCorrection{};
+		Vec2 residual{};
+	};
+
+	RuntimeState runtimeState;
+
+	bool IsFinite(const Vec2& value) noexcept
+	{
+		return std::isfinite(value.x) && std::isfinite(value.y);
+	}
+
+	bool HasReachedStartBullet(const DWORD shotsFired, const int startBullet) noexcept
+	{
+		return startBullet <= 0 || shotsFired >= static_cast<DWORD>(startBullet);
+	}
+
+	bool HasValidRecoilInput(const CEntity& local) noexcept
+	{
+		return IsFinite(local.Pawn.AimPunchAngle) && IsFinite(RCS::RCSScale);
+	}
+
+	LONG QuantizeMouseAxis(const float movement, float& residual) noexcept
+	{
+		const double total = static_cast<double>(movement) + static_cast<double>(residual);
+		const double clamped = std::clamp(
+			total,
+			static_cast<double>(std::numeric_limits<LONG>::min()),
+			static_cast<double>(std::numeric_limits<LONG>::max()));
+		const double whole = std::trunc(clamped);
+		residual = static_cast<float>(clamped - whole);
+		return static_cast<LONG>(whole);
+	}
 }
 
-void RCS::RecoilControl(CEntity LocalPlayer)
+void RCS::ResetRuntime() noexcept
 {
-	if (!LegitBotConfig::RCS)
-		return;
+	runtimeState = RuntimeState{};
+}
 
-	static Vec2 OldPunch = { 0, 0 };
+Vec2 RCS::GetAimCorrection(const CEntity& local) noexcept
+{
+	if (!HasReachedStartBullet(local.Pawn.ShotsFired, RCSBullet) || !HasValidRecoilInput(local))
+		return {};
 
-	if (LocalPlayer.Pawn.ShotsFired > RCSBullet)
+	const float yawScale = std::clamp(RCSScale.x, 0.f, 2.f);
+	const float pitchScale = std::clamp(RCSScale.y, 0.f, 2.f);
+	const Vec2 correction{
+		-2.f * local.Pawn.AimPunchAngle.x * pitchScale,
+		2.f * local.Pawn.AimPunchAngle.y * yawScale
+	};
+	return IsFinite(correction) ? correction : Vec2{};
+}
+
+void RCS::RecoilControl(const CEntity& local, const bool fireDown, const bool suppressOutput) noexcept
+{
+	const float sensitivity = local.Client.Sensitivity;
+	if (!LegitBotConfig::RCS || !local.IsAlive() || !fireDown ||
+		!HasReachedStartBullet(local.Pawn.ShotsFired, RCSBullet) ||
+		!std::isfinite(sensitivity) || sensitivity <= 1e-6f || !HasValidRecoilInput(local))
 	{
-		Vec2 viewAngles = LocalPlayer.Pawn.ViewAngle;
-		Vec2 delta = viewAngles - (viewAngles + (OldPunch - (LocalPlayer.Pawn.AimPunchAngle * 2.f)));
-		int MouseX = static_cast<int>(std::round((delta.y * RCSScale.x / LocalPlayer.Client.Sensitivity) / 0.011f));
-		int MouseY = static_cast<int>(std::round((delta.x * RCSScale.y / LocalPlayer.Client.Sensitivity) / 0.011f));
-
-		if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000))
-		{
-			mouse_event(MOUSEEVENTF_MOVE, MouseX, -MouseY, NULL, NULL);
-			OldPunch = LocalPlayer.Pawn.AimPunchAngle * 2.0f;
-		}
+		ResetRuntime();
+		return;
 	}
-	else
-		OldPunch = Vec2{ 0,0 };
+
+	const Vec2 currentCorrection = GetAimCorrection(local);
+	if (!IsFinite(currentCorrection))
+	{
+		ResetRuntime();
+		return;
+	}
+
+	if (suppressOutput)
+	{
+		runtimeState.previousCorrection = currentCorrection;
+		runtimeState.residual = Vec2{};
+		return;
+	}
+
+	const Vec2 delta{
+		currentCorrection.x - runtimeState.previousCorrection.x,
+		currentCorrection.y - runtimeState.previousCorrection.y
+	};
+	const float countScale = sensitivity * MouseDegreesPerCount;
+	const Vec2 counts{ delta.y / countScale, delta.x / countScale };
+	if (!std::isfinite(countScale) || countScale <= 0.f || !IsFinite(counts))
+	{
+		ResetRuntime();
+		return;
+	}
+
+	const LONG dx = QuantizeMouseAxis(counts.x, runtimeState.residual.x);
+	const LONG dy = QuantizeMouseAxis(counts.y, runtimeState.residual.y);
+	runtimeState.previousCorrection = currentCorrection;
+
+	if (dx != 0 || dy != 0)
+	{
+		mouse_event(
+			MOUSEEVENTF_MOVE,
+			static_cast<DWORD>(dx),
+			static_cast<DWORD>(dy),
+			0,
+			0);
+	}
 }

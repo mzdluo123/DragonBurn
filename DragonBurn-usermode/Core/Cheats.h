@@ -27,8 +27,9 @@ namespace Cheats
 	
 	std::vector<std::pair<int, CEntity>> CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex);
 	std::vector<EntityResult> ProcessEntities(CEntity& localEntity, int& localPlayerControllerIndex);
-	void HandleEnts(const std::vector<EntityResult>& entities, CEntity& localEntity, 
-		int localPlayerControllerIndex, Base_Radar& gameRadar, std::vector<Vec3>& aimPosList);
+	void HandleEnts(const std::vector<EntityResult>& entities, CEntity& localEntity,
+		int localPlayerControllerIndex, Base_Radar& gameRadar,
+		std::vector<AimControl::AimCandidate>& aimCandidates);
 
 	std::string GetCurrentMapName();
 }

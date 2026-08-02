@@ -51,8 +51,6 @@ namespace MenuConfig
 namespace LegitBotConfig
 {
 	inline bool AimBot = true;
-	inline bool AimAlways = false;
-	inline bool AimToggleMode = false;
 	// 0: head 1: neck 3: spine
 	inline int  AimPosition = 0;
 	inline DWORD  AimPositionIndex = BONEINDEX::head;

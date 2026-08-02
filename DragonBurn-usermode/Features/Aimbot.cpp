@@ -1,229 +1,299 @@
 #include "Aimbot.h"
-#undef max()
-#undef min()
 
-void AimControl::switchToggle()
+#include "../Core/Config.h"
+#include "RCS.h"
+#include "TriggerBot.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <limits>
+#include <random>
+#include <string>
+
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
+
+namespace
 {
-    LegitBotConfig::AimAlways = !LegitBotConfig::AimAlways;
-}
+    using Clock = std::chrono::steady_clock;
 
-std::pair<float, float> AimControl::CalculateTargetOffset(const Vec2& ScreenPos, int ScreenCenterX, int ScreenCenterY)
-{
-    float TargetX = 0.0f;
-    float TargetY = 0.0f;
+    constexpr float DegreesPerRadian = 57.29577951308232f;
+    constexpr float MouseDegreesPerCount = 0.022f;
 
-    /*x*/
-    if (ScreenPos.x != ScreenCenterX) {
-        TargetX = (ScreenPos.x > ScreenCenterX) ?
-            -(ScreenCenterX - ScreenPos.x) :
-            ScreenPos.x - ScreenCenterX;
-
-        if (TargetX + ScreenCenterX > ScreenCenterX * 2 || TargetX + ScreenCenterX < 0) {
-            TargetX = 0.0f;
-        }
-    }
-
-    /*y*/
-    if (ScreenPos.y != 0 && ScreenPos.y != ScreenCenterY) {
-        TargetY = (ScreenPos.y > ScreenCenterY) ?
-            -(ScreenCenterY - ScreenPos.y) :
-            ScreenPos.y - ScreenCenterY;
-
-        if (TargetY + ScreenCenterY > ScreenCenterY * 2 || TargetY + ScreenCenterY < 0) {
-            TargetY = 0.0f;
-        }
-    }
-
-    return { TargetX, TargetY };
-}
-
-std::pair<float, float> AimControl::Humanize(float TargetX, float TargetY) {
-
-    static float HumanizationAmount = HumanizationStrength*2/100;
-
-    if (HumanizationAmount <= 0.0f)
+    struct RuntimeState
     {
-        PrevTargetX = TargetX;
-        PrevTargetY = TargetY;
-        return { TargetX, TargetY };
-    }
-    
-    // random distributions for different types of jitter
-    std::uniform_real_distribution<float> jitterDist(-10.f, 10.f);
-    std::uniform_real_distribution<float> microDist(-10.f, 10.f);
-    std::uniform_real_distribution<float> smoothnessDist(0.4f, 10.f);
-    
-    // calculate movement distance for dynamic adjustments
-    float MovementDistance = std::sqrt(TargetX * TargetX + TargetY * TargetY);
-    
-    // add micro-movements (scaled by strength)
-    float MicroJitterX = microDist(gen) * std::min(MovementDistance * 0.25f, 8.0f) * HumanizationAmount;
-    float MicroJitterY = microDist(gen) * std::min(MovementDistance * 0.25f, 8.0f) * HumanizationAmount;
-    
-    // add larger jitter for longer movements (scaled by strength)
-    float JitterScale = std::min(MovementDistance * 0.15f, 12.0f) * HumanizationAmount;
-    float JitterX = jitterDist(gen) * JitterScale;
-    float JitterY = jitterDist(gen) * JitterScale;
-    
-    // create slightly curved path (scaled by strength)
-    float PerpX = -TargetY * 0.35f * jitterDist(gen) * HumanizationAmount;
-    float PerpY = TargetX * 0.35f * jitterDist(gen) * HumanizationAmount;
-    
-    // apply smoothing with strength-controlled factor (more aggressive smoothing variation)
-    // at strength=0, no smoothing (immediate response)
-    // at strength=1, full smoothing range with more noticeable lag
-    float baseSmoothFactor = smoothnessDist(gen);
-    float SmoothFactor = 1.0f - ((1.0f - baseSmoothFactor) * HumanizationAmount);
-    float SmoothedX = TargetX * SmoothFactor + PrevTargetX * (1.0f - SmoothFactor);
-    float SmoothedY = TargetY * SmoothFactor + PrevTargetY * (1.0f - SmoothFactor);
-    
-    // reaction time simulation - occasional delayed response
-    std::uniform_real_distribution<float> reactionDist(0.0f, 1.0f);
-    if (reactionDist(gen) < 0.15f * HumanizationAmount) { // 15% chance at full strength
-        SmoothedX = PrevTargetX; // use previous target (simulates delayed reaction)
-        SmoothedY = PrevTargetY;
-    }
-    
-    // combine
-    float HumanizedX = SmoothedX + MicroJitterX + JitterX + PerpX;
-    float HumanizedY = SmoothedY + MicroJitterY + JitterY + PerpY;
-    
-    // store current targets for next frame smoothing
-    PrevTargetX = TargetX;
-    PrevTargetY = TargetY;
-    
-    return { HumanizedX, HumanizedY };
-}
+        DWORD64 pawnAddress = 0;
+        int hitbox = -1;
+        Clock::time_point lastUpdateTime{};
+        Clock::time_point nextMoveTime{};
+        Clock::time_point reactionUntil{};
+        Vec2 jitter{};
+        Vec2 residual{};
+    };
 
-void AimControl::AimBot(const CEntity& Local, Vec3 LocalPos,std::vector<Vec3>& AimPosList)
-{
-    if (MenuConfig::ShowMenu)
-        return;
+    RuntimeState runtimeState;
+    std::mt19937 randomEngine{ std::random_device{}() };
 
-    std::string curWeapon = TriggerBot::GetWeapon(Local);
-    if (!TriggerBot::CheckWeapon(curWeapon))
-        return;
-
-    if (onlyAuto && !CheckAutoMode(curWeapon))
-        return;
-
-    if (Local.Pawn.ShotsFired <= AimBullet - 1 && AimBullet != 0)
+    bool IsFinite(const Vec2& value) noexcept
     {
-        HasTarget = false;
-        return;
+        return std::isfinite(value.x) && std::isfinite(value.y);
     }
 
-    if (AimControl::ScopeOnly)
+    bool IsFinite(const Vec3& value) noexcept
     {
-        bool isScoped;
-        memoryManager.ReadMemory<bool>(Local.Pawn.Address + Offset.Pawn.isScoped, isScoped);
-        if (!isScoped && TriggerBot::CheckScopeWeapon(curWeapon))
-        {
-            HasTarget = false;
-            return;
-        }
+        return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
     }
 
-    if (!IgnoreFlash && Local.Pawn.FlashDuration > 0.f)
-        return;
-
-    const int ListSize = AimPosList.size();
-    if (ListSize == 0) {
-        HasTarget = false;
-        return;
-    }
-
-    float BestNorm = MAXV;
-    int BestTargetIndex = -1;
-    Vec2 Angles{ 0, 0 };
-
-    const int ScreenCenterX = Gui.Window.Size.x / 2;
-    const int ScreenCenterY = Gui.Window.Size.y / 2;
-
-    for (int i = 0; i < ListSize; i++)
+    bool HasReachedStartBullet(const DWORD shotsFired, const int startBullet) noexcept
     {
-        Vec3 OppPos = AimPosList[i] - LocalPos;
-        const float Distance = sqrt(OppPos.x * OppPos.x + OppPos.y * OppPos.y);
-        if (LegitBotConfig::RCS)
-        {
-            RCS::UpdateAngles(Local, Angles);
-
-            /*x*/
-            const float radX = Angles.x * RCS::RCSScale.x / 360.f * M_PI;
-            const float sinX = sinf(radX);
-            const float cosX = cosf(radX);
-
-            const float z = OppPos.z * cosX + Distance * sinX;
-            const float d = (Distance * cosX - OppPos.z * sinX) / Distance;
-
-            /*y*/
-            const float radY = -Angles.y * RCS::RCSScale.y / 360.f * M_PI;
-            const float sinY = sinf(radY);
-            const float cosY = cosf(radY);
-
-            const float x = (OppPos.x * cosY - OppPos.y * sinY) * d;
-            const float y = (OppPos.x * sinY + OppPos.y * cosY) * d;
-
-            OppPos = Vec3{ x, y, z };
-            AimPosList[i] = LocalPos + OppPos;
-        }
-
-        const float Yaw = atan2f(OppPos.y, OppPos.x) * 57.295779513f - Local.Pawn.ViewAngle.y;
-        const float Pitch = -atan(OppPos.z / Distance) * 57.295779513f - Local.Pawn.ViewAngle.x;
-        const float Norm = sqrt(Yaw * Yaw + Pitch * Pitch);
-
-        if (Norm < BestNorm) {
-            BestNorm = Norm;
-            BestTargetIndex = i;
-        }
+        return startBullet <= 0 || shotsFired >= static_cast<DWORD>(startBullet);
     }
 
-    if (BestNorm >= AimFov || BestNorm <= AimFovMin || BestTargetIndex == -1) {
-        HasTarget = false;
-        return;
-    }
-
-    Vec2 ScreenPos;
-    if (!gGame.View.WorldToScreen(AimPosList[BestTargetIndex], ScreenPos)) {
-        HasTarget = false;
-        return;
-    }
-
-    HasTarget = true;
-
-    auto [TargetX, TargetY] = CalculateTargetOffset(ScreenPos, ScreenCenterX, ScreenCenterY);
-
-    TargetX /= Local.Client.Sensitivity /4;
-    TargetY /= Local.Client.Sensitivity /4;
-    if (Smooth > 0.0f)
+    bool CheckAutoMode(const std::string& weaponName)
     {
-        const float DistanceRatio = BestNorm / AimFov;
-        const float SpeedFactor = 1.0f + (1.0f - DistanceRatio);
-        TargetX /= (Smooth * SpeedFactor);
-        TargetY /= (Smooth * SpeedFactor);
+        return weaponName != "deagle" && weaponName != "elite" && weaponName != "fiveseven" &&
+            weaponName != "glock" && weaponName != "awp" && weaponName != "xm1014" &&
+            weaponName != "mag7" && weaponName != "sawedoff" && weaponName != "tec9" &&
+            weaponName != "zeus" && weaponName != "p2000" && weaponName != "nova" &&
+            weaponName != "p250" && weaponName != "ssg08" && weaponName != "usp" &&
+            weaponName != "revolver";
     }
 
-    if (HumanizeVar)
+    LONG QuantizeMouseAxis(const float movement, float& residual) noexcept
     {
-        auto [HumanizedX, HumanizedY] = Humanize(TargetX, TargetY);
-        TargetX = HumanizedX;
-        TargetY = HumanizedY;
-    }
-
-    static DWORD lastAimTime = GetTickCount64();
-    DWORD currentTick = GetTickCount64();
-
-    if (currentTick - lastAimTime >= MenuConfig::AimDelay)
-    {
-        mouse_event(MOUSEEVENTF_MOVE, TargetX, TargetY, NULL, NULL);
-        lastAimTime = currentTick;
+        const double total = static_cast<double>(movement) + static_cast<double>(residual);
+        const double clamped = std::clamp(
+            total,
+            static_cast<double>(std::numeric_limits<LONG>::min()),
+            static_cast<double>(std::numeric_limits<LONG>::max()));
+        const double whole = std::trunc(clamped);
+        residual = static_cast<float>(clamped - whole);
+        return static_cast<LONG>(whole);
     }
 }
 
-bool AimControl::CheckAutoMode(const std::string& WeaponName)
+void AimControl::ResetRuntime() noexcept
 {
-    if (WeaponName == "deagle" || WeaponName == "elite" || WeaponName == "fiveseven" || WeaponName == "glock" || WeaponName == "awp" || WeaponName == "xm1014" || WeaponName == "mag7" || WeaponName == "sawedoff" || WeaponName == "tec9" || WeaponName == "zeus" || WeaponName == "p2000" || WeaponName == "nova" || WeaponName == "p250" || WeaponName == "ssg08" || WeaponName == "usp" || WeaponName == "revolver")
+    runtimeState = RuntimeState{};
+}
+
+bool AimControl::AimBot(
+    const CEntity& local,
+    const Vec3& localPos,
+    const std::vector<AimCandidate>& candidates)
+{
+    if (MenuConfig::ShowMenu || candidates.empty() || !local.IsAlive())
+    {
+        ResetRuntime();
         return false;
-    else
+    }
+
+    const std::string currentWeapon = TriggerBot::GetWeapon(local);
+    if (currentWeapon.empty() || !TriggerBot::CheckWeapon(currentWeapon) ||
+        (onlyAuto && !CheckAutoMode(currentWeapon)) ||
+        !HasReachedStartBullet(local.Pawn.ShotsFired, AimBullet))
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    if (!IgnoreFlash && local.Pawn.FlashDuration > 0.f)
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    if (ScopeOnly && TriggerBot::CheckScopeWeapon(currentWeapon))
+    {
+        bool isScoped = false;
+        if (!memoryManager.ReadMemory<bool>(local.Pawn.Address + Offset.Pawn.isScoped, isScoped) || !isScoped)
+        {
+            ResetRuntime();
+            return false;
+        }
+    }
+
+    const float sensitivity = local.Client.Sensitivity;
+    if (!std::isfinite(sensitivity) || sensitivity <= 1e-6f || !IsFinite(localPos) ||
+        !IsFinite(local.Pawn.ViewAngle))
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    const float configuredMaxFov = std::isfinite(AimFov) ? AimFov : 0.f;
+    const float maxFov = std::clamp(configuredMaxFov, 0.f, 179.f);
+    const float configuredMinFov = std::isfinite(AimFovMin) ? AimFovMin : 0.f;
+    const float minFov = std::clamp(configuredMinFov, 0.f, maxFov);
+    if (maxFov <= 0.f)
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    const Vec2 recoilCorrection = LegitBotConfig::RCS ? RCS::GetAimCorrection(local) : Vec2{};
+    if (!IsFinite(recoilCorrection))
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    const AimCandidate* bestCandidate = nullptr;
+    float bestPitch = 0.f;
+    float bestYaw = 0.f;
+    float bestNorm = std::numeric_limits<float>::infinity();
+
+    for (const auto& candidate : candidates)
+    {
+        if (candidate.pawnAddress == 0 || !IsFinite(candidate.worldPos))
+            continue;
+
+        const Vec3 delta = candidate.worldPos - localPos;
+        if (!IsFinite(delta))
+            continue;
+
+        const float horizontal = std::hypot(delta.x, delta.y);
+        const float distance = std::hypot(horizontal, delta.z);
+        if (!std::isfinite(horizontal) || !std::isfinite(distance) || distance <= 1e-6f)
+            continue;
+
+        const float targetPitch = std::atan2(-delta.z, horizontal) * DegreesPerRadian;
+        const float targetYaw = std::atan2(delta.y, delta.x) * DegreesPerRadian;
+        const float rawPitch = std::remainder(targetPitch - local.Pawn.ViewAngle.x, 360.f);
+        const float rawYaw = std::remainder(targetYaw - local.Pawn.ViewAngle.y, 360.f);
+        const float correctedPitch = rawPitch + recoilCorrection.x;
+        const float correctedYaw = std::remainder(rawYaw + recoilCorrection.y, 360.f);
+        const float norm = std::hypot(correctedPitch, correctedYaw);
+
+        if (!std::isfinite(correctedPitch) || !std::isfinite(correctedYaw) || !std::isfinite(norm) ||
+            norm < minFov || norm > maxFov)
+            continue;
+
+        if (norm < bestNorm)
+        {
+            bestCandidate = &candidate;
+            bestPitch = correctedPitch;
+            bestYaw = correctedYaw;
+            bestNorm = norm;
+        }
+    }
+
+    if (bestCandidate == nullptr)
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    const float countScale = sensitivity * MouseDegreesPerCount;
+    Vec2 counts{ bestYaw / countScale, bestPitch / countScale };
+    if (!std::isfinite(countScale) || countScale <= 0.f || !IsFinite(counts))
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    const auto now = Clock::now();
+    const bool newTarget = runtimeState.pawnAddress != bestCandidate->pawnAddress ||
+        runtimeState.hitbox != bestCandidate->hitbox;
+    const float humanization = HumanizeVar
+        ? std::clamp(static_cast<float>(HumanizationStrength) / 15.f, 0.f, 1.f)
+        : 0.f;
+
+    if (newTarget)
+    {
+        ResetRuntime();
+        runtimeState.pawnAddress = bestCandidate->pawnAddress;
+        runtimeState.hitbox = bestCandidate->hitbox;
+
+        if (humanization > 0.f)
+        {
+            const int maximumReactionMs = static_cast<int>(std::lround(80.f * humanization));
+            std::uniform_int_distribution<int> reactionDelay(0, maximumReactionMs);
+            runtimeState.reactionUntil = now + std::chrono::milliseconds(reactionDelay(randomEngine));
+        }
+    }
+
+    if (humanization <= 0.f)
+    {
+        runtimeState.jitter = Vec2{};
+        runtimeState.reactionUntil = Clock::time_point{};
+    }
+
+    if (!newTarget && now < runtimeState.nextMoveTime)
         return true;
+
+    const float dt = newTarget
+        ? 1.f / 64.f
+        : std::clamp(std::chrono::duration<float>(now - runtimeState.lastUpdateTime).count(), 0.001f, 0.050f);
+    runtimeState.lastUpdateTime = now;
+    runtimeState.nextMoveTime = now + std::chrono::milliseconds(std::clamp(MenuConfig::AimDelay, 1, 50));
+
+    const float configuredSmooth = std::isfinite(Smooth) ? Smooth : 0.f;
+    float alpha = 1.f;
+    if (configuredSmooth > 0.f)
+    {
+        const float distanceFactor = 2.f - std::clamp(bestNorm / maxFov, 0.f, 1.f);
+        const float tau = 0.010f * std::clamp(configuredSmooth, 0.f, 10.f) * distanceFactor;
+        alpha = 1.f - std::exp(-dt / tau);
+    }
+
+    const Vec2 baseMove{ counts.x * alpha, counts.y * alpha };
+    if (!IsFinite(baseMove))
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    if (humanization > 0.f && now < runtimeState.reactionUntil)
+        return true;
+
+    Vec2 humanizedMove = baseMove;
+    if (humanization > 0.f)
+    {
+        const float rho = std::exp(-dt / 0.080f);
+        const float baseLength = std::hypot(baseMove.x, baseMove.y);
+        const float sigma = humanization * std::min(baseLength * 0.03f, 0.35f);
+        const float noiseScale = std::sqrt(std::max(0.f, 1.f - rho * rho)) * sigma;
+        std::normal_distribution<float> normal(0.f, 1.f);
+
+        runtimeState.jitter.x = rho * runtimeState.jitter.x + noiseScale * normal(randomEngine);
+        runtimeState.jitter.y = rho * runtimeState.jitter.y + noiseScale * normal(randomEngine);
+        humanizedMove.x += runtimeState.jitter.x;
+        humanizedMove.y += runtimeState.jitter.y;
+
+        const float countsLength = std::hypot(counts.x, counts.y);
+        const float maximumLength = std::min(countsLength, baseLength * (1.f + 0.15f * humanization));
+        const float humanizedLength = std::hypot(humanizedMove.x, humanizedMove.y);
+        if (humanizedLength > maximumLength && humanizedLength > 0.f)
+        {
+            const float lengthScale = maximumLength / humanizedLength;
+            humanizedMove.x *= lengthScale;
+            humanizedMove.y *= lengthScale;
+        }
+    }
+
+    if (!IsFinite(humanizedMove))
+    {
+        ResetRuntime();
+        return false;
+    }
+
+    const LONG dx = QuantizeMouseAxis(humanizedMove.x, runtimeState.residual.x);
+    const LONG dy = QuantizeMouseAxis(humanizedMove.y, runtimeState.residual.y);
+    if (dx != 0 || dy != 0)
+    {
+        mouse_event(
+            MOUSEEVENTF_MOVE,
+            static_cast<DWORD>(dx),
+            static_cast<DWORD>(dy),
+            0,
+            0);
+    }
+
+    return true;
 }

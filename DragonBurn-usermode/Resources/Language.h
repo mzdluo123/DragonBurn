@@ -53,7 +53,6 @@ namespace Text {
         inline std::string FeatureName = "Aimbot";
         inline std::string HotKeyList = "Hotkey";
         inline std::string HotKey = "LMB";
-        inline std::string Toggle = "Toggle Mode";
         inline std::string DrawFov = "Show Fov";
         inline std::string VisCheck = "Visible Check";
         inline std::string JumpCheck = "On Ground Check";
@@ -65,6 +64,8 @@ namespace Text {
         inline std::string Tip = "Aimbot will not work while the menu is opened";
         inline std::string ScopeOnly = "Scope Check";
         inline std::string BulletSlider = "Start Bullet: ";
+        inline std::string AimDelaySlider = "Aim Delay: ";
+        inline std::string AimDelayTip = "Minimum interval between aim mouse movements";
         inline std::string IgnoreFlash = "Ignore Flash";
         inline std::string HumanizeVar = "Humanize Aimbot";
         inline std::string OnlyAuto = "Only Auto";

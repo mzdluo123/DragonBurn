@@ -103,9 +103,14 @@ bool TriggerBot::CanTrigger(const CEntity& LocalEntity, const CEntity& TargetEnt
     if (!IgnoreFlash && LocalEntity.Pawn.FlashDuration > 0.0f)
         return false;
 
-    // Check TTD timout
-    DWORD64 playerMask = (DWORD64(1) << LocalPlayerControllerIndex);
-    bool bIsVisible = (TargetEntity.Pawn.bSpottedByMask & playerMask) || (LocalEntity.Pawn.bSpottedByMask & playerMask);
+    // Check TTD timeout without shifting by an invalid controller index.
+    bool bIsVisible = false;
+    if (LocalPlayerControllerIndex >= 0 && LocalPlayerControllerIndex < 64)
+    {
+        const DWORD64 playerMask = DWORD64(1) << LocalPlayerControllerIndex;
+        bIsVisible = (TargetEntity.Pawn.bSpottedByMask & playerMask) != 0 ||
+            (LocalEntity.Pawn.bSpottedByMask & playerMask) != 0;
+    }
     if (TTDtimeout && !bIsVisible)
         return false;
 

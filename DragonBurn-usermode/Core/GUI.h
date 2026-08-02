@@ -2,6 +2,7 @@
 #include "..\Core\Config.h"
 #include "..\Core\Render.h"
 #include "..\Features\Aimbot.h"
+#include "..\Features\RCS.h"
 #include "..\Features\Radar.h"
 #include "..\Features\Misc.h"
 #include "..\Features\TriggerBot.h"
@@ -193,7 +194,7 @@ namespace GUI
 		ImGui::TextDisabled(format, *v);
 		ImGui::SetCursorPosX(CurrentCursorX + CursorX);
 		ImGui::SetNextItemWidth(SliderWidth);
-		Gui.SliderScalarEx2("", ImGuiDataType_Float, v, p_min, p_max, "", ImGuiSliderFlags_None);
+		Gui.SliderScalarEx2("", ImGuiDataType_S32, v, p_min, p_max, "", ImGuiSliderFlags_None);
 		ImGui::PopID();
 	}
 	// ########################################
@@ -218,9 +219,9 @@ namespace GUI
 		{
 			ImGui::SetCursorPos(LogoPos);
 			ImGui::Image(ImageID, LogoSize);
-			if (ImGui::IsItemClicked()) {
-				Gui.OpenWebpage("https://github.com/ByteCorum/DragonBurn");
-			}
+			// if (ImGui::IsItemClicked()) {
+			// 	Gui.OpenWebpage("https://github.com/ByteCorum/DragonBurn");
+			// }
 			ImGui::GetWindowDrawList()->AddRect(
 				ImVec2(MenuConfig::WCS.LogoPos.x + ImGui::GetWindowPos().x, MenuConfig::WCS.LogoPos.y + ImGui::GetWindowPos().y),
 				ImVec2(MenuConfig::WCS.LogoPos.x + LogoW + ImGui::GetWindowPos().x, MenuConfig::WCS.LogoPos.y + LogoH + ImGui::GetWindowPos().y),
@@ -442,6 +443,7 @@ namespace GUI
 
 					static const float FovMin = 0.f, FovMax = 30.f, MinFovMax = 1.f;
 					static const int BulletMin = 0, BulletMax = 5;
+					static const int AimDelayMin = 1, AimDelayMax = 50;
 					static const float SmoothMin = 0.f, SmoothMax = 10.f;
 					static const int MinHumanize = 0;
 					static const int MaxHumanize = 15;
@@ -460,7 +462,7 @@ namespace GUI
 								}).detach();
 						}
 						PutSliderInt(Text::Aimbot::BulletSlider.c_str(), 10.f, &AimControl::AimBullet, &BulletMin, &BulletMax, "%d", Text::Aimbot::StartBulletTip.c_str());
-						PutSwitch(Text::Aimbot::Toggle.c_str(), 10.f, ImGui::GetFrameHeight() * 1.7, &LegitBotConfig::AimToggleMode, false, NULL, NULL, Text::Aimbot::OffTip.c_str());
+						PutSliderInt(Text::Aimbot::AimDelaySlider.c_str(), 10.f, &MenuConfig::AimDelay, &AimDelayMin, &AimDelayMax, "%d ms", Text::Aimbot::AimDelayTip.c_str());
 						PutSwitch(Text::Aimbot::DrawFov.c_str(), 10.f, ImGui::GetFrameHeight() * 1.7, &ESPConfig::DrawFov, true, "###FOVcol", reinterpret_cast<float*>(&LegitBotConfig::FovCircleColor));
 						PutSwitch(Text::Aimbot::VisCheck.c_str(), 10.f, ImGui::GetFrameHeight() * 1.7, &LegitBotConfig::VisibleCheck, false, NULL, NULL, Text::Aimbot::OnTip.c_str());
 						PutSwitch(Text::Aimbot::OnlyAuto.c_str(), 10.f, ImGui::GetFrameHeight() * 1.7, &AimControl::onlyAuto, false, NULL, NULL, Text::Aimbot::OnlyAutoTip.c_str());
@@ -473,7 +475,7 @@ namespace GUI
 
 						PutSliderFloat(Text::Aimbot::FovSlider.c_str(), 10.f, &AimControl::AimFov, &AimControl::AimFovMin, &FovMax, "%.1f");
 						PutSliderFloat(Text::Aimbot::FovMinSlider.c_str(), 10.f, &AimControl::AimFovMin, &FovMin, &MinFovMax, "%.2f");
-						PutSliderFloat(Text::Aimbot::SmoothSlider.c_str(), 10.f, &AimControl::Smooth, &SmoothMin, &SmoothMax, "%.1f", Text::Aimbot::OnlyAutoTip.c_str());
+						PutSliderFloat(Text::Aimbot::SmoothSlider.c_str(), 10.f, &AimControl::Smooth, &SmoothMin, &SmoothMax, "%.1f", Text::Aimbot::SmoothTip.c_str());
 						ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.f);
 						ImGui::TextDisabled(Text::Aimbot::BoneList.c_str());
 
@@ -668,11 +670,11 @@ namespace GUI
 					ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 5.f);
 
 					ImGui::NewLine();
-					if (ImGui::Button("Source Code", { 125.f, 25.f }))
-						Gui.OpenWebpage("https://github.com/ByteCorum/DragonBurn");
-					ImGui::SameLine();
-					if (ImGui::Button("Contact Author", { 125.f, 25.f }))
-						Gui.OpenWebpage("https://discord.gg/5WcvdzFybD");
+					// if (ImGui::Button("Source Code", { 125.f, 25.f }))
+					// 	Gui.OpenWebpage("https://github.com/ByteCorum/DragonBurn");
+					// ImGui::SameLine();
+					// if (ImGui::Button("Contact Author", { 125.f, 25.f }))
+					// 	Gui.OpenWebpage("https://discord.gg/5WcvdzFybD");
 					if (ImGui::Button("Unhook", { 125.f, 25.f }))
 						Init::Client::Exit();
 					ImGui::SameLine();

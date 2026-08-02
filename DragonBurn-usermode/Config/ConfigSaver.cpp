@@ -161,9 +161,9 @@ namespace MyConfigSaver
 
 
         ConfigData["Aimbot"]["Enable"]=           LegitBotConfig::AimBot;
-        ConfigData["Aimbot"]["ToggleMode"]=       LegitBotConfig::AimToggleMode;
         ConfigData["Aimbot"]["Hotkey"]=           AimControl::HotKey;
         ConfigData["Aimbot"]["AimBullet"]=        AimControl::AimBullet;
+        ConfigData["Aimbot"]["AimDelay"]=         MenuConfig::AimDelay;
         ConfigData["Aimbot"]["Fov"]=              AimControl::AimFov;
         ConfigData["Aimbot"]["HumanizationStrength"]=              AimControl::HumanizationStrength;
         ConfigData["Aimbot"]["FovMin"]=           AimControl::AimFovMin;
@@ -413,24 +413,24 @@ namespace MyConfigSaver
 
         if (ConfigData.contains("Aimbot"))
         {
-            LegitBotConfig::AimBot = ReadData(ConfigData["Aimbot"],{"Enable"}, false);
-            LegitBotConfig::AimToggleMode = ReadData(ConfigData["Aimbot"],{"ToggleMode"}, false);
-            AimControl::HotKey = ReadData(ConfigData["Aimbot"],{"Hotkey"}, 0);
-            AimControl::AimBullet = ReadData(ConfigData["Aimbot"],{"AimBullet"}, 0);
-            AimControl::AimFov = ReadData(ConfigData["Aimbot"],{"Fov"}, 5.f);
+            LegitBotConfig::AimBot = ReadData(ConfigData["Aimbot"],{"Enable"}, true);
+            AimControl::HotKey = ReadData(ConfigData["Aimbot"],{"Hotkey"}, VK_LBUTTON);
+            AimControl::AimBullet = ReadData(ConfigData["Aimbot"],{"AimBullet"}, 1);
+            MenuConfig::AimDelay = ReadData(ConfigData["Aimbot"],{"AimDelay"}, 1);
+            AimControl::AimFov = ReadData(ConfigData["Aimbot"],{"Fov"}, 10.f);
             AimControl::HumanizationStrength = ReadData(ConfigData["Aimbot"],{"HumanizationStrength"}, 5);
-            AimControl::AimFovMin = ReadData(ConfigData["Aimbot"],{"FovMin"}, .5f);
+            AimControl::AimFovMin = ReadData(ConfigData["Aimbot"],{"FovMin"}, .4f);
             ESPConfig::DrawFov = ReadData(ConfigData["Aimbot"],{"FovCircle"}, false);
-            LegitBotConfig::FovCircleColor.Value.x = ReadData(ConfigData["Aimbot"],{"CircleColor","r"}, 0.f);
-            LegitBotConfig::FovCircleColor.Value.y = ReadData(ConfigData["Aimbot"],{"CircleColor","g"}, 0.f);
-            LegitBotConfig::FovCircleColor.Value.z = ReadData(ConfigData["Aimbot"],{"CircleColor","b"}, 0.f);
-            LegitBotConfig::FovCircleColor.Value.w = ReadData(ConfigData["Aimbot"],{"CircleColor","a"}, 255.f);
-            AimControl::Smooth = ReadData(ConfigData["Aimbot"],{"Smooth"}, 2.f);
+            LegitBotConfig::FovCircleColor.Value.x = ReadData(ConfigData["Aimbot"],{"CircleColor","r"}, 131.f / 255.f);
+            LegitBotConfig::FovCircleColor.Value.y = ReadData(ConfigData["Aimbot"],{"CircleColor","g"}, 137.f / 255.f);
+            LegitBotConfig::FovCircleColor.Value.z = ReadData(ConfigData["Aimbot"],{"CircleColor","b"}, 150.f / 255.f);
+            LegitBotConfig::FovCircleColor.Value.w = ReadData(ConfigData["Aimbot"],{"CircleColor","a"}, 180.f / 255.f);
+            AimControl::Smooth = ReadData(ConfigData["Aimbot"],{"Smooth"}, 5.f);
             AimControl::HitboxList = LoadVector(ConfigData["Aimbot"], "Hitboxes", { BONEINDEX::head });
             LegitBotConfig::VisibleCheck = ReadData(ConfigData["Aimbot"],{"VisibleCheck"}, true);
             AimControl::IgnoreFlash = ReadData(ConfigData["Aimbot"],{"IgnoreFlash"}, false);
             AimControl::HumanizeVar = ReadData(ConfigData["Aimbot"],{"HumanizeVar"}, true);
-            AimControl::ScopeOnly = ReadData(ConfigData["Aimbot"],{"ScopeOnly"}, false);
+            AimControl::ScopeOnly = ReadData(ConfigData["Aimbot"],{"ScopeOnly"}, true);
             AimControl::onlyAuto = ReadData(ConfigData["Aimbot"], { "OnlyAuto" }, false);
             Text::Aimbot::HotKey = KeyMgr::GetKeyName(AimControl::HotKey);
             LegitBotConfig::HitboxUpdated = false;
@@ -440,8 +440,8 @@ namespace MyConfigSaver
         {
             LegitBotConfig::RCS = ReadData(ConfigData["RCS"],{"Enable"}, true);
             RCS::RCSBullet = ReadData(ConfigData["RCS"], { "RCSBullet" }, 1);
-            RCS::RCSScale.x = ReadData(ConfigData["RCS"],{"Yaw"}, 1.f);
-            RCS::RCSScale.y = ReadData(ConfigData["RCS"],{"Pitch"}, 1.f);
+            RCS::RCSScale.x = ReadData(ConfigData["RCS"],{"Yaw"}, 1.4f);
+            RCS::RCSScale.y = ReadData(ConfigData["RCS"],{"Pitch"}, 1.4f);
         }
 
         if (ConfigData.contains("Triggerbot"))
@@ -521,5 +521,7 @@ namespace MyConfigSaver
             MenuConfig::RadarWinChengePos = true;
             MenuConfig::SpecWinChengePos = true;
         }
+        AimControl::ResetRuntime();
+        RCS::ResetRuntime();
     }
 }

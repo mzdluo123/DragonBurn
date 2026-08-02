@@ -178,7 +178,6 @@ namespace ConfigMenu {
 		ESPConfig::OutOfFOVArrowColor = ImColor(59, 71, 148, 128);
 
 		LegitBotConfig::AimBot = true;
-		LegitBotConfig::AimToggleMode = false;
 		LegitBotConfig::AimPosition = 0;
 		LegitBotConfig::AimPositionIndex = BONEINDEX::head;
 		LegitBotConfig::HitboxUpdated = false;
@@ -239,10 +238,12 @@ namespace ConfigMenu {
 		RCS::RCSBullet = 1;
 		LegitBotConfig::RCS = true;
 
-		RCS::RCSScale = ImVec2(1.4f, 1.4f);
+		RCS::RCSScale = Vec2{ 1.4f, 1.4f };
 		AimControl::onlyAuto = false;
 		AimControl::ScopeOnly = true;
 		AimControl::AimBullet = 1;
+		MenuConfig::AimDelay = 1;
+		AimControl::HitboxList = { BONEINDEX::head };
 
 		LegitBotConfig::FovLineColor = ImVec4(0, 98, 98, 220);
 		ESPConfig::LineToEnemyColor = ImVec4(59, 71, 148, 180);
@@ -290,5 +291,7 @@ namespace ConfigMenu {
 
 		MenuConfig::HotKey = VK_END;
 
+		AimControl::ResetRuntime();
+		RCS::ResetRuntime();
 	}
 }

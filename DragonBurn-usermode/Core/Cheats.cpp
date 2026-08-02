@@ -14,6 +14,8 @@
 #include <thread>
 #include <future>
 #include <iostream>
+#include <cmath>
+#include <limits>
 
 #include "Cheats.h"
 #include "Render.h"
@@ -35,7 +37,7 @@ void Menu();
 void Visual(const CEntity&);
 void Radar(Base_Radar, const CEntity&);
 void Trigger(const CEntity&, const int&);
-void AIM(const CEntity&, std::vector<Vec3>);
+void AIM(const CEntity&, const std::vector<AimControl::AimCandidate>&);
 void MiscFuncs(CEntity&);
 void RenderCrosshair(ImDrawList*, const CEntity&);
 void RadarSetting(Base_Radar&);
@@ -76,8 +78,13 @@ void Cheats::Run()
 
 	// LocalEntity
 	CEntity LocalEntity;
-	int LocalPlayerControllerIndex = 0;
-	LocalEntity.UpdateClientData();
+	int LocalPlayerControllerIndex = -1;
+	if (!LocalEntity.UpdateClientData())
+	{
+		AimControl::ResetRuntime();
+		RCS::ResetRuntime();
+		return;
+	}
 	if (!LocalEntity.UpdateController(LocalControllerAddress))
 		return;
 	if (!LocalEntity.UpdatePawn(LocalPawnAddress) && !MenuConfig::WorkInSpec)
@@ -89,8 +96,6 @@ void Cheats::Run()
 		m_currentTick = 0;
 	}
 
-	// aimbot data
-	std::vector<Vec3> AimPosList;
 
 	// radar data
 	Base_Radar GameRadar;
@@ -99,13 +104,16 @@ void Cheats::Run()
 
 	// process entities
 	auto entityResults = ProcessEntities(LocalEntity, LocalPlayerControllerIndex);
+	std::vector<AimControl::AimCandidate> aimCandidates;
+	aimCandidates.reserve(entityResults.size());
 	
 	// render, collect aim data
-	HandleEnts(entityResults, LocalEntity, LocalPlayerControllerIndex, GameRadar, AimPosList);
+	HandleEnts(entityResults, LocalEntity, LocalPlayerControllerIndex, GameRadar, aimCandidates);
 
 	Visual(LocalEntity);
 	Radar(GameRadar, LocalEntity);
 	MiscFuncs(LocalEntity);
+	AIM(LocalEntity, aimCandidates);
 
 	int currentFPS = static_cast<int>(ImGui::GetIO().Framerate);
 	if (currentFPS > MenuConfig::RenderFPS)
@@ -114,11 +122,10 @@ void Cheats::Run()
 		std::this_thread::sleep_for(std::chrono::milliseconds(FrameWait));
 	}
 	
-	// run trigger & aim every new tick
+	// Run trigger and spectator updates once per game tick.
 	if (m_currentTick != m_previousTick)
 	{
 		Trigger(LocalEntity, LocalPlayerControllerIndex);
-		AIM(LocalEntity, AimPosList);
 		
 		std::vector<CEntity> allEntities;
 		for (const auto& pair : cachedResults) {
@@ -231,14 +238,13 @@ std::vector<EntityResult> Cheats::ProcessEntities(CEntity& localEntity, int& loc
 }
 
 // render, collect aim data
-void Cheats::HandleEnts(const std::vector<EntityResult>& entities, CEntity& localEntity, 
-	int localPlayerControllerIndex, Base_Radar& gameRadar, std::vector<Vec3>& aimPosList)
+void Cheats::HandleEnts(const std::vector<EntityResult>& entities, CEntity& localEntity,
+	int localPlayerControllerIndex, Base_Radar& gameRadar,
+	std::vector<AimControl::AimCandidate>& aimCandidates)
 {
 	// healthbar map (static)
 	static std::map<DWORD64, Render::HealthBar> HealthBarMap;
 
-	// aimbot data
-	float MaxAimDistance = 100000;
 
 	for (const auto& result : entities)
 	{
@@ -264,47 +270,70 @@ void Cheats::HandleEnts(const std::vector<EntityResult>& entities, CEntity& loca
 			ESP::RenderOutOfFOVArrow(localEntity, result.entity);
 		}
 
-        // skip not in screen
-		if (!result.isInScreen)
+		// Collect one safe, closest on-screen hitbox candidate per entity.
+		bool isVisible = !LegitBotConfig::VisibleCheck;
+		if (!isVisible)
 		{
-			continue;
+			const bool localIndexValid = localPlayerControllerIndex >= 0 && localPlayerControllerIndex < 64;
+			const bool entityIndexValid = entityIndex >= 0 && entityIndex < 64;
+			const bool entitySpottedByLocal = localIndexValid &&
+				(entity.Pawn.bSpottedByMask & (DWORD64(1) << localPlayerControllerIndex)) != 0;
+			const bool localSpottedByEntity = entityIndexValid &&
+				(localEntity.Pawn.bSpottedByMask & (DWORD64(1) << entityIndex)) != 0;
+			isVisible = entitySpottedByLocal || localSpottedByEntity;
 		}
 
-		// process aimbot data
-		if (!AimControl::HitboxList.empty()) {
-			float minDistance = FLT_MAX;
-			Vec3 bestAimPos = { 0, 0, 0 };
+		const float windowWidth = Gui.Window.Size.x;
+		const float windowHeight = Gui.Window.Size.y;
+		if (isVisible && !AimControl::HitboxList.empty() &&
+			std::isfinite(windowWidth) && std::isfinite(windowHeight) &&
+			windowWidth > 0.f && windowHeight > 0.f)
+		{
+			const auto& bones = entity.Pawn.BoneData.BonePosList;
+			const Vec2 screenCenter{ windowWidth * 0.5f, windowHeight * 0.5f };
+			const BoneJointPos* bestBone = nullptr;
+			int bestHitbox = -1;
+			float bestDistance = std::numeric_limits<float>::infinity();
 
-			ImVec2 screenCenter{ Gui.Window.Size.x / 2, Gui.Window.Size.y / 2 };
-
-			constexpr float DEG_TO_RAD = M_PI / 180.f;
-			constexpr float STATIC_FOV = 90.0f;
-			float halfWindowSize = Gui.Window.Size.x / 2.f;
-			float staticFovTan = tan(STATIC_FOV * DEG_TO_RAD / 2.f);
-			float aimFovTan = tan(AimControl::AimFov * DEG_TO_RAD / 2.f);
-			float aimFovRadius = (aimFovTan / staticFovTan) * halfWindowSize;
-
-			for (size_t i = 0; i < AimControl::HitboxList.size(); ++i) {
-				int hitboxID = AimControl::HitboxList[i];
-
-				float distanceToSight = entity.GetBone().BonePosList[hitboxID].ScreenPos.DistanceTo(
-					{ screenCenter.x, screenCenter.y });
-
-				if (distanceToSight < minDistance && distanceToSight <= aimFovRadius) {
-					minDistance = distanceToSight;
-
-					if (!LegitBotConfig::VisibleCheck ||
-						entity.Pawn.bSpottedByMask & (DWORD64(1) << (localPlayerControllerIndex)) ||
-						localEntity.Pawn.bSpottedByMask & (DWORD64(1) << (entityIndex))) {
-						Vec3 tempPos = entity.GetBone().BonePosList[hitboxID].Pos;
-
-						bestAimPos = tempPos;
-						aimPosList.push_back(bestAimPos);
-						MaxAimDistance = distanceToSight;
+			for (std::size_t i = 0; i < AimControl::HitboxList.size(); ++i)
+			{
+				const int hitbox = AimControl::HitboxList[i];
+				bool duplicate = false;
+				for (std::size_t previous = 0; previous < i; ++previous)
+				{
+					if (AimControl::HitboxList[previous] == hitbox)
+					{
+						duplicate = true;
+						break;
 					}
 				}
+
+				if (duplicate || hitbox < 0 || static_cast<std::size_t>(hitbox) >= bones.size())
+					continue;
+
+				const auto& bone = bones[static_cast<std::size_t>(hitbox)];
+				if (!std::isfinite(bone.Pos.x) || !std::isfinite(bone.Pos.y) || !std::isfinite(bone.Pos.z) ||
+					!std::isfinite(bone.ScreenPos.x) || !std::isfinite(bone.ScreenPos.y) ||
+					bone.ScreenPos.x < 0.f || bone.ScreenPos.x > windowWidth ||
+					bone.ScreenPos.y < 0.f || bone.ScreenPos.y > windowHeight)
+					continue;
+
+				const float distance = bone.ScreenPos.DistanceTo(screenCenter);
+				if (std::isfinite(distance) && distance < bestDistance)
+				{
+					bestBone = &bone;
+					bestHitbox = hitbox;
+					bestDistance = distance;
+				}
 			}
+
+			if (bestBone != nullptr)
+				aimCandidates.push_back({ bestBone->Pos, entity.Pawn.Address, bestHitbox });
 		}
+
+		// Pawn origin visibility only constrains ESP, not aimbot bone collection.
+		if (!result.isInScreen)
+			continue;
 
 		// render esp
 		if (ESPConfig::ESPenabled && (!ESPConfig::FlashCheck || localEntity.Pawn.FlashDuration < 0.1f))
@@ -399,25 +428,18 @@ void Trigger(const CEntity& LocalEntity, const int& LocalPlayerControllerIndex)
 		TriggerBot::Run(LocalEntity, LocalPlayerControllerIndex);
 }
 
-void AIM(const CEntity& LocalEntity, std::vector<Vec3> AimPosList)
+void AIM(const CEntity& LocalEntity, const std::vector<AimControl::AimCandidate>& aimCandidates)
 {
-	DWORD lastTick = 0;
-	DWORD currentTick = GetTickCount64();
+	const bool aimKeyDown = (GetAsyncKeyState(AimControl::HotKey) & 0x8000) != 0;
+	bool tracking = false;
 
-	if (!LegitBotConfig::AimBot) {
-		RCS::RecoilControl(LocalEntity);
-		return;
-	}
+	if (LegitBotConfig::AimBot && !MenuConfig::ShowMenu && aimKeyDown)
+		tracking = AimControl::AimBot(LocalEntity, LocalEntity.Pawn.CameraPos, aimCandidates);
+	else
+		AimControl::ResetRuntime();
 
-	bool shouldAim = LegitBotConfig::AimAlways || GetAsyncKeyState(AimControl::HotKey);
-	if (shouldAim && !AimPosList.empty())
-		AimControl::AimBot(LocalEntity, LocalEntity.Pawn.CameraPos, AimPosList);
-
-	if (LegitBotConfig::AimToggleMode && (GetAsyncKeyState(AimControl::HotKey) & 0x8000) &&
-		currentTick - lastTick >= 200) {
-		AimControl::switchToggle();
-		lastTick = currentTick;
-	}
+	const bool fireDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+	RCS::RecoilControl(LocalEntity, fireDown, tracking);
 }
 
 void MiscFuncs(CEntity& LocalEntity)

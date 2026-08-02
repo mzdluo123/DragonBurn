@@ -1,6 +1,8 @@
 #pragma once
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <map>
 #include <Windows.h>
@@ -58,23 +60,29 @@ namespace Render
 		if (!ESPConfig::DrawFov)
 			return;
 
-		constexpr float DEG_TO_RAD = M_PI / 180.f;
-		constexpr float STATIC_FOV = 90.0f;
-		
-		ImVec2 center = ImVec2(Gui.Window.Size.x / 2.0f, Gui.Window.Size.y / 2.0f);
-		float halfWindowSize = Gui.Window.Size.x / 2.0f;
+		constexpr float DEG_TO_RAD = 0.01745329251994329577f;
+		const float projectionFov = LocalEntity.Pawn.Fov >= 1 && LocalEntity.Pawn.Fov <= 179
+			? static_cast<float>(LocalEntity.Pawn.Fov)
+			: 90.f;
+		const float configuredMaxFov = std::isfinite(AimControl::AimFov) ? AimControl::AimFov : 0.f;
+		const float maxFov = std::clamp(configuredMaxFov, 0.f, 179.f);
+		const float configuredMinFov = std::isfinite(AimControl::AimFovMin) ? AimControl::AimFovMin : 0.f;
+		const float minFov = std::clamp(configuredMinFov, 0.f, maxFov);
+		if (maxFov <= 0.f)
+			return;
 
-		float staticFovTan = tan(STATIC_FOV * DEG_TO_RAD / 2.0f);
-		float aimFovTan = tan(AimControl::AimFov * DEG_TO_RAD / 2.0f);
-
-		float radius = (aimFovTan / staticFovTan) * halfWindowSize;
+		const ImVec2 center{ Gui.Window.Size.x / 2.f, Gui.Window.Size.y / 2.f };
+		const float halfWindowSize = Gui.Window.Size.x / 2.f;
+		const float projectionFovTan = std::tan(projectionFov * DEG_TO_RAD / 2.f);
+		const float aimFovTan = std::tan(maxFov * DEG_TO_RAD / 2.f);
+		const float radius = (aimFovTan / projectionFovTan) * halfWindowSize;
 
 		drawList->AddCircle(center, radius, LegitBotConfig::FovCircleColor, 0, 1.5f);
 
-		if (AimControl::AimFovMin > 0)
+		if (minFov > 0.f)
 		{
-			float aimFovMinTan = tan(AimControl::AimFovMin * DEG_TO_RAD / 2.0f);
-			float minRadius = (aimFovMinTan / staticFovTan) * halfWindowSize;
+			const float aimFovMinTan = std::tan(minFov * DEG_TO_RAD / 2.f);
+			const float minRadius = (aimFovMinTan / projectionFovTan) * halfWindowSize;
 			drawList->AddCircle(center, minRadius, LegitBotConfig::FovCircleColor, 0, 1.5f);
 		}
 	}
