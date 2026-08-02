@@ -14,7 +14,7 @@ bool CBone::UpdateAllBoneData(const DWORD64& EntityPawnAddress) {
     if (!memoryManager.ReadMemory(gameSceneNodeAddr + Offset.Pawn.BoneArray, boneArrayAddr))
         return false;
 
-    constexpr size_t NUM_BONES = 30;
+    constexpr size_t NUM_BONES = static_cast<size_t>(BONEINDEX::ankle_R) + 1;
 
     // Read bone data (position + rotation)
     CBoneData IData[NUM_BONES];
@@ -48,6 +48,7 @@ bool CBone::UpdateAllBoneData(const DWORD64& EntityPawnAddress) {
             IData[i].Rotation  // Rotation
             });
     }
+
     return true;
 }
 
@@ -103,7 +104,7 @@ bool CBone::UpdateAllBoneDataBatch(const DWORD64& EntityPawnAddress) {
 	if (BoneArrayAddress == 0) return false;
 
 	// BATCH READ 3: Read all bone data at once
-	constexpr size_t NUM_BONES = 30;
+	constexpr size_t NUM_BONES = static_cast<size_t>(BONEINDEX::ankle_R) + 1;
 	std::vector<std::pair<DWORD64, SIZE_T>> batch3Requests;
 	batch3Requests.reserve(NUM_BONES);
 
