@@ -40,6 +40,9 @@
     <Filter Include="Features\Legit">
       <UniqueIdentifier>{bec5d160-9097-41fe-b2e1-d771a6544092}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Third Party\CivetWeb">
+      <UniqueIdentifier>{a0f07985-7cde-4890-9fa3-3ac09f576cc1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Resources\WeaponIcon.h">
@@ -193,6 +196,16 @@
     <ClInclude Include="Helpers\KeyManager.h">
       <Filter>Helpers</Filter>
     </ClInclude>
+    <ClInclude Include="Features\WebRadar.h"><Filter>Features</Filter></ClInclude>
+    <ClInclude Include="Features\WebRadarMapProvider.h"><Filter>Features</Filter></ClInclude>
+    <ClInclude Include="Resources\WebRadarAssets.generated.h"><Filter>Resources</Filter></ClInclude>
+    <ClInclude Include="Libs\civetweb\include\civetweb.h"><Filter>Third Party\CivetWeb</Filter></ClInclude>
+    <ClInclude Include="Libs\civetweb\src\md5.inl"><Filter>Third Party\CivetWeb</Filter></ClInclude>
+    <ClInclude Include="Libs\civetweb\src\sort.inl"><Filter>Third Party\CivetWeb</Filter></ClInclude>
+    <ClInclude Include="Libs\civetweb\src\match.inl"><Filter>Third Party\CivetWeb</Filter></ClInclude>
+    <ClInclude Include="Libs\civetweb\src\response.inl"><Filter>Third Party\CivetWeb</Filter></ClInclude>
+    <ClInclude Include="Libs\civetweb\src\sha1.inl"><Filter>Third Party\CivetWeb</Filter></ClInclude>
+    <ClInclude Include="Libs\civetweb\src\handle_form.inl"><Filter>Third Party\CivetWeb</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
@@ -277,6 +290,12 @@
     <ClCompile Include="Helpers\StorageMgr.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
+    <ClCompile Include="Features\WebRadar.cpp"><Filter>Features</Filter></ClCompile>
+    <ClCompile Include="Features\WebRadarMapProvider.cpp"><Filter>Features</Filter></ClCompile>
+    <ClCompile Include="Libs\civetweb\src\civetweb.c"><Filter>Third Party\CivetWeb</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="..\DragonBurn-web\package-lock.json"><Filter>Resources</Filter></CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resources\Resource.rc" />

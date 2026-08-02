@@ -48,7 +48,7 @@
     <OutDir>$(SolutionDir)\built_dbg\</OutDir>
     <IntDir>$(SolutionDir)\built_dbg\cache\um</IntDir>
     <RunCodeAnalysis>false</RunCodeAnalysis>
-    <IncludePath>Libs\json</IncludePath>
+    <IncludePath>Libs\json;Libs\civetweb\include;$(IncludePath)</IncludePath>
     <ExternalIncludePath>$(ExternalIncludePath)</ExternalIncludePath>
     <TargetName>VoidSpectre</TargetName>
     <LibraryPath>$(LibraryPath)</LibraryPath>
@@ -57,7 +57,7 @@
     <OutDir>$(SolutionDir)\built\</OutDir>
     <IntDir>$(SolutionDir)\built\cache\um</IntDir>
     <RunCodeAnalysis>false</RunCodeAnalysis>
-    <IncludePath>Libs\json</IncludePath>
+    <IncludePath>Libs\json;Libs\civetweb\include;$(IncludePath)</IncludePath>
     <ExternalIncludePath>$(ExternalIncludePath)</ExternalIncludePath>
     <TargetName>VoidSpectre</TargetName>
     <LibraryPath>$(LibraryPath)</LibraryPath>
@@ -66,7 +66,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>DBDEBUG;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DBDEBUG;_DEBUG;_CONSOLE;USE_WEBSOCKET;NO_SSL;NO_CGI;NO_CACHING;NO_FILES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
@@ -74,7 +74,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Ws2_32.lib;Winhttp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
@@ -84,7 +84,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;USE_WEBSOCKET;NO_SSL;NO_CGI;NO_CACHING;NO_FILES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
@@ -93,7 +93,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Ws2_32.lib;Winhttp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
@@ -116,6 +116,8 @@
     <ClInclude Include="Features\SoundESP.h" />
     <ClInclude Include="Features\SpectatorList.h" />
     <ClInclude Include="Features\TriggerBot.h" />
+    <ClInclude Include="Features\WebRadar.h" />
+    <ClInclude Include="Features\WebRadarMapProvider.h" />
     <ClInclude Include="Game\Bone.h" />
     <ClInclude Include="Game\Entity.h" />
     <ClInclude Include="Game\Game.h" />
@@ -149,6 +151,14 @@
     <ClInclude Include="Resources\Language.h" />
     <ClInclude Include="Resources\Sounds.h" />
     <ClInclude Include="Resources\WeaponIcon.h" />
+    <ClInclude Include="Resources\WebRadarAssets.generated.h" />
+    <ClInclude Include="Libs\civetweb\include\civetweb.h" />
+    <ClInclude Include="Libs\civetweb\src\md5.inl" />
+    <ClInclude Include="Libs\civetweb\src\sort.inl" />
+    <ClInclude Include="Libs\civetweb\src\match.inl" />
+    <ClInclude Include="Libs\civetweb\src\response.inl" />
+    <ClInclude Include="Libs\civetweb\src\sha1.inl" />
+    <ClInclude Include="Libs\civetweb\src\handle_form.inl" />
     <ClInclude Include="Helpers\StorageMgr.h" />
   </ItemGroup>
   <ItemGroup>
@@ -161,6 +171,9 @@
     <ClCompile Include="Features\Radar.cpp" />
     <ClCompile Include="Features\RCS.cpp" />
     <ClCompile Include="Features\TriggerBot.cpp" />
+    <ClCompile Include="Features\WebRadar.cpp" />
+    <ClCompile Include="Features\WebRadarMapProvider.cpp" />
+    <ClCompile Include="Libs\civetweb\src\civetweb.c" />
     <ClCompile Include="Game\Bone.cpp" />
     <ClCompile Include="Game\Entity.cpp" />
     <ClCompile Include="Game\Game.cpp" />
@@ -180,6 +193,14 @@
     <ClCompile Include="OS-ImGui\OS-ImGui_External.cpp" />
     <ClCompile Include="Core\MemoryMgr.cpp" />
     <ClCompile Include="Helpers\StorageMgr.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="..\DragonBurn-web\package-lock.json">
+      <Message>Building and embedding DragonBurn web radar</Message>
+      <Command>cd /d "$(ProjectDir)..\DragonBurn-web"&#xD;&#xA;call npm ci&#xD;&#xA;call npm run build&#xD;&#xA;node scripts\embed-assets.mjs dist "$(ProjectDir)Resources\WebRadarAssets.generated.h"</Command>
+      <AdditionalInputs>..\DragonBurn-web\package.json;..\DragonBurn-web\tsconfig.json;..\DragonBurn-web\tsconfig.app.json;..\DragonBurn-web\tsconfig.node.json;..\DragonBurn-web\vite.config.ts;..\DragonBurn-web\index.html;..\DragonBurn-web\scripts\embed-assets.mjs;..\DragonBurn-web\src\main.tsx;..\DragonBurn-web\src\App.tsx;..\DragonBurn-web\src\RadarScene.tsx;..\DragonBurn-web\src\protocol.ts;..\DragonBurn-web\src\radarMath.ts;..\DragonBurn-web\src\radarMath.test.ts;..\DragonBurn-web\src\useRadarSocket.ts;..\DragonBurn-web\src\styles.css;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs>$(ProjectDir)Resources\WebRadarAssets.generated.h</Outputs>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resources\Resource.rc" />

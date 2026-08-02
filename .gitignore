@@ -290,6 +290,9 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
+*.tsbuildinfo
+DragonBurn-web/dist/
+DragonBurn-usermode/Resources/WebRadarAssets.generated.h
 
 # Visual Studio 6 build log
 *.plg

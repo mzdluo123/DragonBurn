@@ -30,6 +30,7 @@
 #include "../Features/SpectatorList.h"
 #include "../Helpers/Logger.h"
 #include "../Features/SoundESP.h"
+#include "../Features/WebRadar.h"
 
 int PreviousTotalHits = 0;
 
@@ -50,6 +51,7 @@ void Cheats::Run()
 
 #ifndef DBDEBUG
 	if (!Init::Client::isGameWindowActive() && !MenuConfig::ShowMenu) {
+		WebRadar::Invalidate();
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 		return;
 	}
@@ -57,7 +59,10 @@ void Cheats::Run()
 
 	// Update matrix
 	if (!memoryManager.ReadMemory(gGame.GetMatrixAddress(), gGame.View.Matrix,64))
+	{
+		WebRadar::Invalidate();
 		return;
+	}
 
 	// Update EntityList Entry
 	gGame.UpdateEntityListEntry();
@@ -66,15 +71,22 @@ void Cheats::Run()
 	DWORD64 LocalPawnAddress = 0;
 
 	if (!memoryManager.ReadMemory(gGame.GetLocalControllerAddress(), LocalControllerAddress))
+	{
+		WebRadar::Invalidate();
 		return;
+	}
 	if (!memoryManager.ReadMemory(gGame.GetLocalPawnAddress(), LocalPawnAddress))
+	{
+		WebRadar::Invalidate();
 		return;
+	}
 
 	if (LocalPawnAddress == 0 || LocalControllerAddress == 0) {
-        g_globalVars->UpdateGlobalvars();
-        cachedResults.clear();
-        return;
-    }
+		g_globalVars->UpdateGlobalvars();
+		cachedResults.clear();
+		WebRadar::Invalidate();
+		return;
+	}
 
 	// LocalEntity
 	CEntity LocalEntity;
@@ -83,12 +95,21 @@ void Cheats::Run()
 	{
 		AimControl::ResetRuntime();
 		RCS::ResetRuntime();
+		WebRadar::Invalidate();
 		return;
 	}
 	if (!LocalEntity.UpdateController(LocalControllerAddress))
+	{
+		WebRadar::Invalidate();
 		return;
-	if (!LocalEntity.UpdatePawn(LocalPawnAddress) && !MenuConfig::WorkInSpec)
-		return;
+	}
+	const bool localPawnReady = LocalEntity.UpdatePawn(LocalPawnAddress);
+	if (!localPawnReady)
+	{
+		WebRadar::Invalidate();
+		if (!MenuConfig::WorkInSpec)
+			return;
+	}
 
 	// Update m_currentTick
 	bool success = memoryManager.ReadMemory<DWORD>(LocalEntity.Controller.Address + Offset.PlayerController.m_nTickBase, m_currentTick);
@@ -104,6 +125,10 @@ void Cheats::Run()
 
 	// process entities
 	auto entityResults = ProcessEntities(LocalEntity, LocalPlayerControllerIndex);
+	if (!localPawnReady || cachedResults.empty())
+		WebRadar::Invalidate();
+	else
+		WebRadar::Publish(LocalEntity, cachedResults, m_currentTick, GetCurrentMapName());
 	std::vector<AimControl::AimCandidate> aimCandidates;
 	aimCandidates.reserve(entityResults.size());
 	
@@ -177,6 +202,8 @@ std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEnt
 
 	if (batchData.empty())
 	{
+		cachedResults.clear();
+		WebRadar::Invalidate();
 		return {};
 	}
 
@@ -185,6 +212,8 @@ std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEnt
 	EntityBatchProcessor processor;
 	if (!processor.ProcessAllEntities(entities, batchData))
 	{
+		cachedResults.clear();
+		WebRadar::Invalidate();
 		return {};
 	}
 

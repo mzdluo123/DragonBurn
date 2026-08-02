@@ -75,6 +75,8 @@ Press END key to open/close menu.
 -   Proportion
 -   Range
 -   Alpha
+
+-   Web radar (`http://127.0.0.1:16668`)
 </details>
 
 <details>
@@ -132,7 +134,7 @@ Press END key to open/close menu.
 
 ### 🛠️How to use
 
-Configure and build with CMake, the Visual Studio 2022 generator, MSVC v143, and the Windows Driver Kit:
+Configure and build with CMake, the Visual Studio 2022 generator, MSVC v143, the Windows Driver Kit, and Node.js `^20.19.0 || >=22.12.0`:
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -T v143
@@ -146,6 +148,8 @@ Use `--config Debug` for a debug build. CMake builds the user-mode client and ma
 - `VoidSpectre-Core.sys`
 
 Run `VoidSpectre.exe` as administrator. It derives the host-specific device path (`\\.\<32 hexadecimal characters>`) from the active computer name, connects to it, and, if unavailable, launches `VoidSpectre-Mapper.exe`, waits for the mapper to finish, and reconnects automatically.
+
+After the client finishes startup, open `http://127.0.0.1:16668` on the same computer. The web radar is loopback-only; it streams player snapshots over WebSocket and downloads validated map assets into `Documents\DragonBurn\Data\WebRadarMaps` on demand.
 
 The mapper restores the original Intel vulnerable-driver loading flow. When `cfg::image` is empty, it reads `VoidSpectre-Core.sys` from its own directory. Embedded and encrypted `cfg::image` data remains supported.
 

@@ -1,7 +1,33 @@
 cmake_minimum_required(VERSION 3.20)
-project(DragonBurnSolution VERSION 3.3.8.0 LANGUAGES CXX)
+project(DragonBurnSolution VERSION 3.3.8.0 LANGUAGES C CXX)
 
 set(USERMODE_DIR "${CMAKE_SOURCE_DIR}/DragonBurn-usermode")
+set(WEB_RADAR_DIR "${CMAKE_SOURCE_DIR}/DragonBurn-web")
+set(WEB_RADAR_ASSETS_HEADER "${USERMODE_DIR}/Resources/WebRadarAssets.generated.h")
+find_program(NPM_EXECUTABLE npm REQUIRED)
+find_program(NODE_EXECUTABLE node REQUIRED)
+file(GLOB_RECURSE WEB_RADAR_SOURCE_INPUTS CONFIGURE_DEPENDS "${WEB_RADAR_DIR}/src/*")
+add_custom_command(
+    OUTPUT "${WEB_RADAR_ASSETS_HEADER}"
+    COMMAND "${NPM_EXECUTABLE}" ci
+    COMMAND "${NPM_EXECUTABLE}" run build
+    COMMAND "${NODE_EXECUTABLE}" "${WEB_RADAR_DIR}/scripts/embed-assets.mjs"
+        "${WEB_RADAR_DIR}/dist" "${WEB_RADAR_ASSETS_HEADER}"
+    DEPENDS
+        "${WEB_RADAR_DIR}/package.json"
+        "${WEB_RADAR_DIR}/package-lock.json"
+        "${WEB_RADAR_DIR}/tsconfig.json"
+        "${WEB_RADAR_DIR}/tsconfig.app.json"
+        "${WEB_RADAR_DIR}/tsconfig.node.json"
+        "${WEB_RADAR_DIR}/vite.config.ts"
+        "${WEB_RADAR_DIR}/index.html"
+        "${WEB_RADAR_DIR}/scripts/embed-assets.mjs"
+        ${WEB_RADAR_SOURCE_INPUTS}
+    WORKING_DIRECTORY "${WEB_RADAR_DIR}"
+    COMMENT "Building and embedding DragonBurn web radar"
+    VERBATIM
+)
+add_custom_target(DragonBurn-web-assets DEPENDS "${WEB_RADAR_ASSETS_HEADER}")
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 20)
@@ -68,6 +94,9 @@ set(DRAGONBURN_SOURCES
     Features/Misc.cpp
     Features/Radar.cpp
     Features/RCS.cpp
+    Features/WebRadar.cpp
+    Features/WebRadarMapProvider.cpp
+    Libs/civetweb/src/civetweb.c
     Features/TriggerBot.cpp
     
     # Game
@@ -125,6 +154,15 @@ set(DRAGONBURN_HEADERS
     Features/SoundESP.h
     Features/SpectatorList.h
     Features/TriggerBot.h
+    Features/WebRadar.h
+    Features/WebRadarMapProvider.h
+    Libs/civetweb/src/md5.inl
+    Libs/civetweb/src/sort.inl
+    Libs/civetweb/src/match.inl
+    Libs/civetweb/src/response.inl
+    Libs/civetweb/src/sha1.inl
+    Libs/civetweb/src/handle_form.inl
+    Libs/civetweb/include/civetweb.h
     
     # Game
     Game/Bone.h
@@ -171,6 +209,7 @@ set(DRAGONBURN_HEADERS
     Resources/Language.h
     Resources/Sounds.h
     Resources/WeaponIcon.h
+    Resources/WebRadarAssets.generated.h
 )
 
 # Resource files for main app
@@ -185,12 +224,13 @@ set(DRAGONBURN_SHARED_HEADERS "${CMAKE_SOURCE_DIR}/Shared/DragonBurnProtocol.h")
 
 # Create the main executable
 add_executable(DragonBurn-usermode ${DRAGONBURN_SOURCES} ${DRAGONBURN_HEADERS} ${DRAGONBURN_RESOURCES} ${DRAGONBURN_SHARED_HEADERS})
+add_dependencies(DragonBurn-usermode DragonBurn-web-assets)
 
 # Set target name
 set_target_properties(DragonBurn-usermode PROPERTIES OUTPUT_NAME "VoidSpectre")
 
 # Include directories for main app
-target_include_directories(DragonBurn-usermode PRIVATE ${DRAGONBURN_INCLUDES})
+target_include_directories(DragonBurn-usermode PRIVATE ${DRAGONBURN_INCLUDES} "${USERMODE_DIR}/Libs/civetweb/include")
 
 # Compiler-specific options for main app
 if(MSVC)
@@ -203,6 +243,11 @@ if(MSVC)
         _CONSOLE
         UNICODE
         _UNICODE
+        USE_WEBSOCKET
+        NO_SSL
+        NO_CGI
+        NO_CACHING
+        NO_FILES
     )
     
     set_property(TARGET DragonBurn-usermode PROPERTY
@@ -235,7 +280,24 @@ target_link_libraries(DragonBurn-usermode PRIVATE
     uuid
     odbc32
     odbccp32
+    ws2_32
+    winhttp
 )
+
+enable_testing()
+add_executable(DragonBurnWebRadarContracts
+    "${USERMODE_DIR}/Tests/WebRadarContracts.cpp"
+    "${USERMODE_DIR}/Features/WebRadarMapProvider.cpp"
+    "${USERMODE_DIR}/Features/WebRadarMapProvider.h"
+)
+target_include_directories(DragonBurnWebRadarContracts PRIVATE
+    "${USERMODE_DIR}/Libs/json"
+    "${USERMODE_DIR}"
+)
+target_compile_definitions(DragonBurnWebRadarContracts PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(DragonBurnWebRadarContracts PRIVATE winhttp)
+add_test(NAME DragonBurnWebRadarContracts COMMAND DragonBurnWebRadarContracts)
+set_target_properties(DragonBurnWebRadarContracts PROPERTIES FOLDER "Tests")
 
 #############################################
 # DragonBurn Mapper

@@ -1,0 +1,74 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #edf3f8;
+  background: #080b10;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; }
+body { overflow: hidden; }
+button, select { font: inherit; }
+
+.app-shell { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 70px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #26303c;
+  background: #10151dcc;
+}
+.topbar h1 { margin: 0; font-size: 20px; letter-spacing: 0.03em; }
+.topbar p { margin: 4px 0 0; color: #8d9baa; font-size: 13px; }
+.status { padding: 5px 9px; border-radius: 999px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; background: #303945; }
+.status-connected { color: #9af0b1; background: #183c25; }
+.status-connecting { color: #f2d487; background: #43371a; }
+.status-disconnected { color: #ff9b9b; background: #431f24; }
+
+.content { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
+.map-panel { position: relative; min-width: 0; min-height: 0; background: #080b10; }
+.radar-scene, .radar-scene canvas { width: 100%; height: 100%; display: block; }
+.map-controls {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #344050;
+  border-radius: 7px;
+  background: #111821e8;
+  box-shadow: 0 5px 20px #0008;
+}
+.map-controls label { color: #9cabb9; font-size: 12px; }
+.map-controls select, .map-controls button { color: #edf3f8; border: 1px solid #435163; border-radius: 5px; background: #1b2530; padding: 5px 8px; }
+.map-controls button { cursor: pointer; }
+.messages { position: absolute; left: 14px; bottom: 14px; max-width: min(520px, calc(100% - 28px)); }
+.messages p { margin: 6px 0 0; padding: 8px 10px; border-radius: 5px; background: #1d2631e8; color: #cbd5df; font-size: 13px; }
+.messages .error { color: #ffb2b2; border-left: 3px solid #e8525d; }
+
+.players-panel { min-height: 0; border-left: 1px solid #26303c; background: #0d1219; display: grid; grid-template-rows: auto 1fr; }
+.players-panel h2 { display: flex; justify-content: space-between; margin: 0; padding: 16px; border-bottom: 1px solid #26303c; font-size: 15px; }
+.players-panel h2 span { color: #8190a0; font-weight: 500; }
+.player-list { min-height: 0; overflow: auto; padding: 8px; }
+.player-row { margin-bottom: 6px; padding: 10px; border: 1px solid #27313d; border-left: 3px solid #7d8995; border-radius: 5px; background: #141b24; }
+.player-row.team-2 { border-left-color: #e8a23a; }
+.player-row.team-3 { border-left-color: #55a7e8; }
+.player-row.dead { opacity: 0.55; }
+.player-title, .player-detail { display: flex; justify-content: space-between; gap: 10px; }
+.player-title { font-size: 13px; }
+.player-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-title span { flex: 0 0 auto; color: #aeb9c4; }
+.player-detail { margin-top: 6px; color: #778696; font-size: 11px; }
+.empty { color: #748291; text-align: center; font-size: 13px; }
+
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  .app-shell { min-height: 100%; height: auto; }
+  .content { grid-template-columns: 1fr; grid-template-rows: min(78vh, 720px) auto; }
+  .players-panel { border-left: 0; border-top: 1px solid #26303c; }
+  .player-list { overflow: visible; }
+}
