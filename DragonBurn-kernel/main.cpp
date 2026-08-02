@@ -139,45 +139,43 @@ int wmain(const int argc, wchar_t** argv)
 	return 0;
 }
 
-bool CheckWindowsKernelPrefs() 
+static bool TryReadRegistryDword(const char* subKey, const char* valueName, DWORD& value)
 {
-	HKEY hKey;
-	LONG openStatus = RegOpenKeyExA(
-		HKEY_LOCAL_MACHINE,
-		"SYSTEM\\CurrentControlSet\\Control\\CI\\Config",
-		0,
-		KEY_READ,
-		&hKey
-	);
-	if (openStatus != ERROR_SUCCESS)
+	HKEY key = nullptr;
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, subKey, 0, KEY_READ, &key) != ERROR_SUCCESS)
 		return false;
 
-	DWORD data = 0;
-	DWORD dataSize = sizeof(data);
 	DWORD type = 0;
-
-	LONG queryStatus = RegQueryValueExA(
-		hKey,
-		"VulnerableDriverBlocklistEnable",
+	DWORD valueSize = sizeof(value);
+	const LONG queryStatus = RegQueryValueExA(
+		key,
+		valueName,
 		nullptr,
 		&type,
-		(LPBYTE)&data,
-		&dataSize
-	);
-	RegCloseKey(hKey);
+		reinterpret_cast<LPBYTE>(&value),
+		&valueSize);
+	RegCloseKey(key);
 
-	if (queryStatus == ERROR_SUCCESS)
-	{
-		if (type == REG_DWORD)
-		{
-			if (static_cast<int>(data) == 0)
-				return true;
-			else
-				return false;
-		}
-	}
+	return queryStatus == ERROR_SUCCESS && type == REG_DWORD;
+}
 
-	return false;
+bool CheckWindowsKernelPrefs()
+{
+	DWORD blocklistEnabled = 1;
+	if (!TryReadRegistryDword(
+		"SYSTEM\\CurrentControlSet\\Control\\CI\\Config",
+		"VulnerableDriverBlocklistEnable",
+		blocklistEnabled) || blocklistEnabled != 0)
+		return false;
+
+	DWORD memoryIntegrityEnabled = 0;
+	if (TryReadRegistryDword(
+		"SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
+		"Enabled",
+		memoryIntegrityEnabled) && memoryIntegrityEnabled != 0)
+		return false;
+
+	return true;
 }
 
 LONG WINAPI SimplestCrashHandler(EXCEPTION_POINTERS* ExceptionInfo)

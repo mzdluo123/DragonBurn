@@ -68,7 +68,7 @@ NTSTATUS service::RegisterAndStart(const std::wstring& driver_path, const std::w
 	ss.str("");
 
 	if (ntStatus == STATUS_IMAGE_CERT_REVOKED)
-		Log::Error("Your vulnerable driver list is enabled and have blocked the driver loading, you must disable vulnerable driver list to use kdmapper with intel driver\n>>>Registry path to disable vulnerable driver list: HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\CI\\Config\n>>>Set 'VulnerableDriverBlocklistEnable' as dword to 0", false);
+		Log::Error("Windows Code Integrity blocked the Intel driver. Disable Memory integrity (HVCI) and the Microsoft Vulnerable Driver Blocklist, then restart Windows.\n>>>HVCI registry path: HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity (set 'Enabled' DWORD to 0)\n>>>Blocklist registry path: HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\CI\\Config (set 'VulnerableDriverBlocklistEnable' DWORD to 0)", false);
 
 	else if (ntStatus == STATUS_ACCESS_DENIED || ntStatus == STATUS_INSUFFICIENT_RESOURCES)
 	{
