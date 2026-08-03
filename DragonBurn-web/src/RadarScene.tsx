@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { groupVisiblePlayers, interpolatePlayer, worldToScene } from "./radarMath";
+import { formatWeaponLabel, groupVisiblePlayers, interpolatePlayer, worldToScene, yawToMapRotation } from "./radarMath";
 import type { MapMetadata, RadarPlayer, RadarSnapshot } from "./protocol";
 
 interface RadarSceneProps {
@@ -18,10 +18,44 @@ interface SceneResources {
   mapMaterial: THREE.MeshBasicMaterial;
   geometries: THREE.BufferGeometry[];
   materials: THREE.Material[];
-  meshes: [THREE.InstancedMesh, THREE.InstancedMesh, THREE.InstancedMesh, THREE.InstancedMesh];
 }
 
-const playerColor = (team: number) => new THREE.Color(team === 2 ? 0xe8a23a : team === 3 ? 0x55a7e8 : 0xd8d8d8);
+interface PlayerMarker {
+  root: HTMLDivElement;
+  direction: HTMLDivElement;
+  name: HTMLSpanElement;
+  weapon: HTMLSpanElement;
+  health: HTMLSpanElement;
+  lastFrame: number;
+}
+
+function createPlayerMarker(layer: HTMLDivElement): PlayerMarker {
+  const root = document.createElement("div");
+  root.className = "radar-player";
+
+  const symbol = document.createElement("div");
+  symbol.className = "radar-player-symbol";
+  const direction = document.createElement("div");
+  direction.className = "radar-player-direction";
+  symbol.appendChild(direction);
+
+  const label = document.createElement("div");
+  label.className = "radar-player-label";
+  const name = document.createElement("span");
+  name.className = "radar-player-name";
+  const details = document.createElement("span");
+  details.className = "radar-player-details";
+  const weapon = document.createElement("span");
+  weapon.className = "radar-player-weapon";
+  const health = document.createElement("span");
+  health.className = "radar-player-health";
+  details.append(weapon, health);
+  label.append(name, details);
+  root.append(symbol, label);
+  layer.appendChild(root);
+
+  return { root, direction, name, weapon, health, lastFrame: 0 };
+}
 
 export default function RadarScene({ snapshot, map, selectedLayer, onRenderError, onMapError }: RadarSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -98,6 +132,12 @@ export default function RadarScene({ snapshot, map, selectedLayer, onRenderError
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     host.appendChild(renderer.domElement);
 
+    const markerLayer = document.createElement("div");
+    markerLayer.className = "radar-players";
+    markerLayer.setAttribute("aria-label", "Players on map");
+    host.appendChild(markerLayer);
+    const markers = new Map<number, PlayerMarker>();
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x080b10);
     const camera = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 10);
@@ -106,41 +146,15 @@ export default function RadarScene({ snapshot, map, selectedLayer, onRenderError
     const planeGeometry = new THREE.PlaneGeometry(1, 1);
     const mapMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const plane = new THREE.Mesh(planeGeometry, mapMaterial);
-    plane.position.z = 0;
     scene.add(plane);
-
-    const circleGeometry = new THREE.CircleGeometry(0.012, 16);
-    const triangleGeometry = new THREE.BufferGeometry();
-    triangleGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
-      0, 0.024, 0,
-      -0.008, 0.008, 0,
-      0.008, 0.008, 0,
-    ], 3));
-    const currentCircleMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
-    const currentArrowMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
-    const otherCircleMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.25, depthWrite: false });
-    const otherArrowMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.25, depthWrite: false });
-
-    const currentCircles = new THREE.InstancedMesh(circleGeometry, currentCircleMaterial, 64);
-    const currentArrows = new THREE.InstancedMesh(triangleGeometry, currentArrowMaterial, 64);
-    const otherCircles = new THREE.InstancedMesh(circleGeometry, otherCircleMaterial, 64);
-    const otherArrows = new THREE.InstancedMesh(triangleGeometry, otherArrowMaterial, 64);
-    const meshes: SceneResources["meshes"] = [currentCircles, currentArrows, otherCircles, otherArrows];
-    meshes.forEach((mesh, index) => {
-      mesh.count = 0;
-      mesh.position.z = index < 2 ? 2 : 1;
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      scene.add(mesh);
-    });
 
     const resources: SceneResources = {
       renderer,
       scene,
       camera,
       mapMaterial,
-      geometries: [planeGeometry, circleGeometry, triangleGeometry],
-      materials: [mapMaterial, currentCircleMaterial, currentArrowMaterial, otherCircleMaterial, otherArrowMaterial],
-      meshes,
+      geometries: [planeGeometry],
+      materials: [mapMaterial],
     };
     resourcesRef.current = resources;
     setRendererReady(true);
@@ -155,35 +169,35 @@ export default function RadarScene({ snapshot, map, selectedLayer, onRenderError
     resizeObserver.observe(host);
     resize();
 
-    const matrix = new THREE.Matrix4();
-    const position = new THREE.Vector3();
-    const rotation = new THREE.Quaternion();
-    const scale = new THREE.Vector3(1, 1, 1);
-    const zAxis = new THREE.Vector3(0, 0, 1);
+    const updateMarker = (player: RadarPlayer, otherFloor: boolean, metadata: MapMetadata, frame: number) => {
+      let marker = markers.get(player.slot);
+      if (!marker) {
+        marker = createPlayerMarker(markerLayer);
+        markers.set(player.slot, marker);
+      }
 
-    const updateGroup = (players: RadarPlayer[], circles: THREE.InstancedMesh, arrows: THREE.InstancedMesh, metadata: MapMetadata) => {
-      circles.count = players.length;
-      arrows.count = players.length;
-      players.forEach((player, index) => {
-        const point = worldToScene(player.x, player.y, metadata);
-        position.set(point.x, point.y, 0);
-        rotation.identity();
-        matrix.compose(position, rotation, scale);
-        circles.setMatrixAt(index, matrix);
-        circles.setColorAt(index, playerColor(player.team));
-        rotation.setFromAxisAngle(zAxis, THREE.MathUtils.degToRad(-player.yaw));
-        matrix.compose(position, rotation, scale);
-        arrows.setMatrixAt(index, matrix);
-        arrows.setColorAt(index, playerColor(player.team));
-      });
-      circles.instanceMatrix.needsUpdate = true;
-      arrows.instanceMatrix.needsUpdate = true;
-      if (circles.instanceColor) circles.instanceColor.needsUpdate = true;
-      if (arrows.instanceColor) arrows.instanceColor.needsUpdate = true;
+      const point = worldToScene(player.x, player.y, metadata);
+      marker.root.style.left = `${(point.x + 0.5) * 100}%`;
+      marker.root.style.top = `${(0.5 - point.y) * 100}%`;
+      marker.direction.style.transform = `rotate(${yawToMapRotation(player.yaw)}deg)`;
+
+      const className = `radar-player team-${player.team}${otherFloor ? " other-floor" : ""}${player.slot === -1 ? " local-player" : ""}`;
+      if (marker.root.className !== className) marker.root.className = className;
+      const displayName = player.name || "Unknown";
+      if (marker.name.textContent !== displayName) marker.name.textContent = displayName;
+      const weapon = formatWeaponLabel(player.weapon);
+      if (marker.weapon.textContent !== weapon) marker.weapon.textContent = weapon;
+      const health = `${player.health} HP`;
+      if (marker.health.textContent !== health) marker.health.textContent = health;
+      marker.health.className = `radar-player-health${player.health <= 25 ? " low" : ""}`;
+      marker.root.hidden = false;
+      marker.lastFrame = frame;
     };
 
     let animationFrame = 0;
+    let markerFrame = 0;
     const animate = () => {
+      markerFrame += 1;
       const metadata = mapRef.current;
       const selected = layerRef.current;
       const { previous, current, receivedAt } = snapshotsRef.current;
@@ -192,15 +206,15 @@ export default function RadarScene({ snapshot, map, selectedLayer, onRenderError
         const alpha = Math.min(Math.max((performance.now() - receivedAt) / duration, 0), 1);
         const previousBySlot = new Map(previous?.players.map((player) => [player.slot, player]) ?? []);
         const players = current.players.map((player) => interpolatePlayer(previousBySlot.get(player.slot), player, alpha));
-        if (current.local) {
-          players.push(interpolatePlayer(previous?.local ?? undefined, current.local, alpha));
-        }
+        if (current.local) players.push(interpolatePlayer(previous?.local ?? undefined, current.local, alpha));
+
         const groups = groupVisiblePlayers(players, metadata, selected);
-        updateGroup(groups.current, currentCircles, currentArrows, metadata);
-        updateGroup(groups.other, otherCircles, otherArrows, metadata);
-      } else {
-        meshes.forEach((mesh) => { mesh.count = 0; });
+        groups.current.forEach((player) => updateMarker(player, false, metadata, markerFrame));
+        groups.other.forEach((player) => updateMarker(player, true, metadata, markerFrame));
       }
+      markers.forEach((marker) => {
+        if (marker.lastFrame !== markerFrame) marker.root.hidden = true;
+      });
       renderer.render(scene, camera);
       animationFrame = requestAnimationFrame(animate);
     };
@@ -213,6 +227,8 @@ export default function RadarScene({ snapshot, map, selectedLayer, onRenderError
       mapMaterial.map?.dispose();
       resources.geometries.forEach((geometry) => geometry.dispose());
       resources.materials.forEach((material) => material.dispose());
+      markers.clear();
+      markerLayer.remove();
       renderer.dispose();
       renderer.domElement.remove();
     };

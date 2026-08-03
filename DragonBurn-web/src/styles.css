@@ -29,7 +29,60 @@ button, select { font: inherit; }
 
 .content { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
 .map-panel { position: relative; min-width: 0; min-height: 0; background: #080b10; }
-.radar-scene, .radar-scene canvas { width: 100%; height: 100%; display: block; }
+.radar-scene { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.radar-scene canvas { width: 100%; height: 100%; display: block; }
+.radar-players { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.radar-player {
+  --team-color: #d8d8d8;
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translate(-12px, -12px);
+  filter: drop-shadow(0 2px 3px #000c);
+  white-space: nowrap;
+}
+.radar-player.team-2 { --team-color: #f0a43c; }
+.radar-player.team-3 { --team-color: #4daaf0; }
+.radar-player.other-floor { opacity: 0.34; }
+.radar-player-symbol {
+  position: relative;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  border: 2px solid #f7fbff;
+  border-radius: 50%;
+  background: var(--team-color);
+  box-shadow: 0 0 0 2px #071019cc;
+}
+.radar-player.local-player .radar-player-symbol { box-shadow: 0 0 0 2px #fff, 0 0 10px var(--team-color); }
+.radar-player-direction {
+  position: absolute;
+  left: 5px;
+  top: -4px;
+  width: 10px;
+  height: 16px;
+  clip-path: polygon(50% 0, 100% 43%, 67% 43%, 67% 100%, 33% 100%, 33% 43%, 0 43%);
+  background: #fff;
+  filter: drop-shadow(0 0 1px #000);
+  transform-origin: 50% 100%;
+}
+.radar-player-label {
+  display: grid;
+  gap: 2px;
+  max-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid #f3f7fb45;
+  border-left: 3px solid var(--team-color);
+  border-radius: 4px;
+  background: #071019e6;
+  line-height: 1.1;
+}
+.radar-player-name { overflow: hidden; color: #fff; font-size: 12px; font-weight: 700; text-overflow: ellipsis; }
+.radar-player-details { display: flex; gap: 7px; font-size: 10px; font-weight: 650; }
+.radar-player-weapon { color: #ffd37b; }
+.radar-player-health { color: #91efaa; }
+.radar-player-health.low { color: #ff7f88; }
 .map-controls {
   position: absolute;
   top: 14px;
@@ -42,11 +95,12 @@ button, select { font: inherit; }
   border-radius: 7px;
   background: #111821e8;
   box-shadow: 0 5px 20px #0008;
+  z-index: 3;
 }
 .map-controls label { color: #9cabb9; font-size: 12px; }
 .map-controls select, .map-controls button { color: #edf3f8; border: 1px solid #435163; border-radius: 5px; background: #1b2530; padding: 5px 8px; }
 .map-controls button { cursor: pointer; }
-.messages { position: absolute; left: 14px; bottom: 14px; max-width: min(520px, calc(100% - 28px)); }
+.messages { position: absolute; left: 14px; bottom: 14px; z-index: 3; max-width: min(520px, calc(100% - 28px)); }
 .messages p { margin: 6px 0 0; padding: 8px 10px; border-radius: 5px; background: #1d2631e8; color: #cbd5df; font-size: 13px; }
 .messages .error { color: #ffb2b2; border-left: 3px solid #e8525d; }
 

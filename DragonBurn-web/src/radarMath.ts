@@ -3,6 +3,17 @@ import type { MapMetadata, RadarPlayer } from "./protocol";
 export const MAX_RADAR_PLAYERS = 64;
 export const SNAPSHOT_TTL_MS = 500;
 
+export function yawToMapRotation(yaw: number): number {
+  const rotation = (90 - yaw) % 360;
+  return rotation < 0 ? rotation + 360 : rotation;
+}
+
+export function formatWeaponLabel(weapon: string): string {
+  const normalized = weapon.trim().replace(/^weapon_/i, "");
+  if (!normalized || normalized.toLowerCase() === "none") return "UNARMED";
+  return normalized.replaceAll("_", " ").toUpperCase();
+}
+
 export function worldToScene(x: number, y: number, map: MapMetadata): { x: number; y: number } {
   const fx = (x - map.position.x) / map.scale / 1024;
   const fy = (map.position.y - y) / map.scale / 1024;

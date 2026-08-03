@@ -296,21 +296,14 @@ namespace OSImGui
             if (Type == ATTACH && !UpdateWindowData()) 
                 break;
 
-            // Skip rendering when the game window is not focused
-            if (Type == ATTACH) {
-                HWND hForeground = GetForegroundWindow();
-
-                if (hForeground != DestWindow.hWnd && hForeground != Window.hWnd) {
-                    const float* actualClearColor = reinterpret_cast<const float*>(&Window.BgColor.Value);
-
-                    g_Device.g_pd3dDeviceContext->OMSetRenderTargets(1, &g_Device.g_mainRenderTargetView, nullptr);
-                    g_Device.g_pd3dDeviceContext->ClearRenderTargetView(g_Device.g_mainRenderTargetView, actualClearColor);
-
-                    g_Device.g_pSwapChain->Present(1, 0);
-                    Sleep(1);
-
-                    continue;
-                }
+            // Keep the frame callback running while the attached game window is
+            // unfocused. Cheats::Run uses this path to refresh the web radar,
+            // while draw submission remains disabled so the overlay stays hidden.
+            bool renderFrame = true;
+            if (Type == ATTACH)
+            {
+                const HWND foregroundWindow = GetForegroundWindow();
+                renderFrame = foregroundWindow == DestWindow.hWnd || foregroundWindow == Window.hWnd;
             }
 
             ImGuiIO& io = ImGui::GetIO();
@@ -375,7 +368,8 @@ namespace OSImGui
 
             g_Device.g_pd3dDeviceContext->OMSetRenderTargets(1, &g_Device.g_mainRenderTargetView, nullptr);
             g_Device.g_pd3dDeviceContext->ClearRenderTargetView(g_Device.g_mainRenderTargetView, actualClearColor);
-            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+            if (renderFrame)
+                ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
             g_Device.g_pSwapChain->Present(1, 0);
         }
         CleanImGui();

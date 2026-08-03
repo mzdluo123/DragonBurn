@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSnapshot } from "./protocol";
-import { groupVisiblePlayers, isSnapshotExpired, layerForAltitude, worldToScene } from "./radarMath";
+import { formatWeaponLabel, groupVisiblePlayers, isSnapshotExpired, layerForAltitude, worldToScene, yawToMapRotation } from "./radarMath";
 import type { MapMetadata, RadarPlayer, RadarSnapshot } from "./protocol";
 
 const player = (slot: number, overrides: Partial<RadarPlayer> = {}): RadarPlayer => ({
@@ -55,6 +55,17 @@ describe("snapshot protocol", () => {
 
 describe("radar contracts", () => {
   it("maps the overview origin exactly", () => expect(worldToScene(-2476, 3239, map)).toEqual({ x: -0.5, y: 0.5 }));
+  it("maps Source yaw to a north-up marker", () => {
+    expect(yawToMapRotation(0)).toBe(90);
+    expect(yawToMapRotation(90)).toBe(0);
+    expect(yawToMapRotation(180)).toBe(270);
+    expect(yawToMapRotation(-90)).toBe(180);
+  });
+  it("formats weapon values for map labels", () => {
+    expect(formatWeaponLabel("weapon_ak47")).toBe("AK47");
+    expect(formatWeaponLabel("ct_knife")).toBe("CT KNIFE");
+    expect(formatWeaponLabel("Weapon_None")).toBe("UNARMED");
+  });
   it("uses half-open altitude ranges", () => expect(layerForAltitude(0, map)).toBe("main"));
   it("caps instances at 64", () => {
     const groups = groupVisiblePlayers(Array.from({ length: 65 }, (_, index) => player(index)), map, "main");

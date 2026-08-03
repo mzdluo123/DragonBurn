@@ -111,6 +111,7 @@ public:
 
 	bool UpdateController(const DWORD64& PlayerControllerAddress);
 	bool UpdatePawn(const DWORD64& PlayerPawnAddress);
+	bool UpdateRadarPawn(const DWORD64& PlayerPawnAddress);
 	bool UpdateClientData();
 	bool IsAlive() const;
 	bool IsInScreen();

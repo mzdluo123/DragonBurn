@@ -24,6 +24,7 @@ namespace
 {
     constexpr std::size_t MaxRadarPlayers = 64;
     constexpr auto PublishInterval = std::chrono::milliseconds(50);
+    constexpr auto InvalidPublishInterval = std::chrono::milliseconds(1000);
 
     struct RadarPlayer
     {
@@ -55,6 +56,7 @@ namespace
     RadarSnapshot latestSnapshot;
     std::atomic<std::uint64_t> nextSequence{ 1 };
     std::atomic<std::int64_t> nextPublishAtMs{ 0 };
+    std::atomic<std::int64_t> nextInvalidPublishAtMs{ 0 };
 
     std::int64_t SteadyTimeMs()
     {
@@ -205,9 +207,23 @@ void WebRadar::Publish(const CEntity& localEntity,
 
 void WebRadar::Invalidate()
 {
+    const auto now = SteadyTimeMs();
     std::unique_lock lock(snapshotMutex, std::try_to_lock);
-    if (!lock.owns_lock() || (latestSnapshot.sequence != 0 && !latestSnapshot.inGame))
+    if (!lock.owns_lock())
         return;
+
+    if (latestSnapshot.sequence != 0 && !latestSnapshot.inGame)
+    {
+        auto deadline = nextInvalidPublishAtMs.load(std::memory_order_relaxed);
+        if (now < deadline || !nextInvalidPublishAtMs.compare_exchange_strong(
+            deadline, now + InvalidPublishInterval.count(), std::memory_order_relaxed))
+            return;
+    }
+    else
+    {
+        nextInvalidPublishAtMs.store(now + InvalidPublishInterval.count(), std::memory_order_relaxed);
+    }
+
     RadarSnapshot snapshot;
     snapshot.sequence = nextSequence.fetch_add(1, std::memory_order_relaxed);
     snapshot.serverTimeMs = SystemTimeMs();
@@ -435,7 +451,7 @@ bool WebRadar::Start(const WebRadarConfig& config)
     std::lock_guard lock(serviceState.lifecycleMutex);
     if (serviceState.context)
         return true;
-    if (config.listenAddress != "127.0.0.1" || config.port == 0 || config.mapCacheRoot.empty())
+    if (config.listenAddress != "0.0.0.0" || config.port == 0 || config.mapCacheRoot.empty())
         return false;
     const unsigned features = mg_init_library(MG_FEATURES_WEBSOCKET);
     if ((features & MG_FEATURES_WEBSOCKET) == 0)

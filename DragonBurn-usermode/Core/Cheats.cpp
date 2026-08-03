@@ -49,20 +49,12 @@ void Cheats::Run()
 
 	Misc::AutoAccept::UpdateAutoAccept();
 
-#ifndef DBDEBUG
-	if (!Init::Client::isGameWindowActive() && !MenuConfig::ShowMenu) {
-		WebRadar::Invalidate();
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-		return;
-	}
-#endif
+	const HWND foregroundWindow = GetForegroundWindow();
+	const bool backgroundRadarOnly = foregroundWindow != Init::Client::GetGameWindow()
+		&& foregroundWindow != Gui.Window.hWnd;
 
 	// Update matrix
-	if (!memoryManager.ReadMemory(gGame.GetMatrixAddress(), gGame.View.Matrix,64))
-	{
-		WebRadar::Invalidate();
-		return;
-	}
+	const bool matrixReady = memoryManager.ReadMemory(gGame.GetMatrixAddress(), gGame.View.Matrix, 64);
 
 	// Update EntityList Entry
 	gGame.UpdateEntityListEntry();
@@ -91,12 +83,11 @@ void Cheats::Run()
 	// LocalEntity
 	CEntity LocalEntity;
 	int LocalPlayerControllerIndex = -1;
-	if (!LocalEntity.UpdateClientData())
+	const bool clientDataReady = LocalEntity.UpdateClientData();
+	if (!clientDataReady)
 	{
 		AimControl::ResetRuntime();
 		RCS::ResetRuntime();
-		WebRadar::Invalidate();
-		return;
 	}
 	if (!LocalEntity.UpdateController(LocalControllerAddress))
 	{
@@ -104,12 +95,7 @@ void Cheats::Run()
 		return;
 	}
 	const bool localPawnReady = LocalEntity.UpdatePawn(LocalPawnAddress);
-	if (!localPawnReady)
-	{
-		WebRadar::Invalidate();
-		if (!MenuConfig::WorkInSpec)
-			return;
-	}
+	const bool localRadarPawnReady = localPawnReady || LocalEntity.UpdateRadarPawn(LocalPawnAddress);
 
 	// Update m_currentTick
 	bool success = memoryManager.ReadMemory<DWORD>(LocalEntity.Controller.Address + Offset.PlayerController.m_nTickBase, m_currentTick);
@@ -120,15 +106,34 @@ void Cheats::Run()
 
 	// radar data
 	Base_Radar GameRadar;
-	if ((RadarCFG::ShowRadar && LocalEntity.Controller.TeamID != 0) || (RadarCFG::ShowRadar && MenuConfig::ShowMenu))
+	if (!backgroundRadarOnly && ((RadarCFG::ShowRadar && LocalEntity.Controller.TeamID != 0)
+		|| (RadarCFG::ShowRadar && MenuConfig::ShowMenu)))
 		RadarSetting(GameRadar);
 
 	// process entities
-	auto entityResults = ProcessEntities(LocalEntity, LocalPlayerControllerIndex);
-	if (!localPawnReady || cachedResults.empty())
-		WebRadar::Invalidate();
+	std::vector<EntityResult> entityResults;
+	if (!backgroundRadarOnly && matrixReady && clientDataReady && (localPawnReady || MenuConfig::WorkInSpec))
+		entityResults = ProcessEntities(LocalEntity, LocalPlayerControllerIndex);
 	else
+		CollectEntityData(LocalEntity, LocalPlayerControllerIndex);
+	if (!localRadarPawnReady)
+	{
+		WebRadar::Invalidate();
+	}
+	else if (cachedResults.empty())
+	{
+		WebRadar::Invalidate();
+	}
+	else
+	{
 		WebRadar::Publish(LocalEntity, cachedResults, m_currentTick, GetCurrentMapName());
+	}
+	if (backgroundRadarOnly || !matrixReady || !clientDataReady || (!localPawnReady && !MenuConfig::WorkInSpec))
+	{
+		if (backgroundRadarOnly)
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		return;
+	}
 	std::vector<AimControl::AimCandidate> aimCandidates;
 	aimCandidates.reserve(entityResults.size());
 	
@@ -549,12 +554,12 @@ void RenderCrosshair(ImDrawList* drawList, const CEntity& LocalEntity)
 }
 
 std::string Cheats::GetCurrentMapName() {
-    if (!g_globalVars || !g_globalVars->g_cCurrentMap) {
+    if (!g_globalVars || !g_globalVars->g_cCurrentMapName) {
         return "";
     }
 
     char currentMap[256] = { 0 };
-    if (!memoryManager.ReadMemory(reinterpret_cast<DWORD64>(g_globalVars->g_cCurrentMap),
+    if (!memoryManager.ReadMemory(reinterpret_cast<DWORD64>(g_globalVars->g_cCurrentMapName),
         currentMap, sizeof(currentMap) - 1)) {
         return "";
     }

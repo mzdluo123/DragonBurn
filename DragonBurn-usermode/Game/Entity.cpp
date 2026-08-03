@@ -118,6 +118,24 @@ bool CEntity::UpdatePawn(const DWORD64& PlayerPawnAddress)
 	return true;
 }
 
+bool CEntity::UpdateRadarPawn(const DWORD64& PlayerPawnAddress)
+{
+	if (PlayerPawnAddress == 0)
+		return false;
+	this->Pawn.Address = PlayerPawnAddress;
+
+	if (!this->Pawn.GetPos())
+		return false;
+	if (!this->Pawn.GetViewAngle())
+		return false;
+	if (!this->Pawn.GetHealth())
+		return false;
+	if (!this->Pawn.GetWeaponName())
+		this->Pawn.WeaponName.clear();
+
+	return true;
+}
+
 bool CEntity::UpdateClientData()
 {
 	if (!this->Client.GetSensitivity())

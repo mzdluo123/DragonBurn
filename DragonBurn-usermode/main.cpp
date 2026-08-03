@@ -238,14 +238,14 @@ UPDATE_OFFSETS://UPDATE_OFFSETS
 	Log::Fine("DragonBurn loaded");
 
 	const WebRadarConfig webRadarConfig{
-		"127.0.0.1",
+		"0.0.0.0",
 		16668,
 		fs::path(MenuConfig::path) / "Data" / "WebRadarMaps"
 	};
 	if (WebRadar::Start(webRadarConfig))
-		Log::Fine("Web radar listening at http://127.0.0.1:16668/");
+		Log::Fine("Web radar listening on 0.0.0.0:16668");
 	else
-		Log::Warning("Web radar could not start on 127.0.0.1:16668; overlay will continue");
+		Log::Warning("Web radar could not start on 0.0.0.0:16668; overlay will continue");
 
 
 #ifndef DBDEBUG
