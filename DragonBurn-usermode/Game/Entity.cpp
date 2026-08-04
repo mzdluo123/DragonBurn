@@ -492,19 +492,23 @@ bool EntityBatchProcessor::ProcessRadarEntities(
 	entities.clear();
 	entities.reserve(batchData.size());
 
-	// Initialize entities
 	for (const auto& data : batchData) {
 		CEntity entity;
 		entity.Controller.Address = data.controllerAddress;
 		entity.Pawn.Address = data.pawnAddress;
 		entities.emplace_back(data.entityIndex, std::move(entity));
 	}
-
 	std::vector<DWORD64> weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses;
 	if (!ProcessCoreEntityData(entities, weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses)) {
 		entities.clear();
 		return false;
 	}
+
+	// Radar only needs the active weapon handle from the service phase.
+	std::fill(aimPunchServiceAddresses.begin(), aimPunchServiceAddresses.end(), 0);
+	std::vector<DWORD64> weaponAddresses;
+	if (ProcessServiceData(entities, weaponServiceAddresses, aimPunchServiceAddresses, weaponAddresses))
+		ProcessRadarWeaponNames(entities, weaponAddresses);
 
 	return true;
 }
@@ -704,6 +708,38 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		aimPunchServiceAddresses.push_back(aimPunchServiceAddr);
 		cameraAddresses.push_back(cameraAddr);
 	}
+
+	return true;
+}
+
+bool EntityBatchProcessor::ProcessRadarWeaponNames(
+	std::vector<std::pair<int, CEntity>>& entities,
+	const std::vector<DWORD64>& weaponAddresses) {
+
+	std::vector<std::pair<DWORD64, SIZE_T>> requests;
+	std::vector<size_t> entityIndices;
+	requests.reserve(weaponAddresses.size());
+	entityIndices.reserve(weaponAddresses.size());
+
+	for (size_t index = 0; index < weaponAddresses.size(); ++index) {
+		entities[index].second.Pawn.WeaponName.clear();
+		if (weaponAddresses[index] == 0)
+			continue;
+
+		requests.emplace_back(weaponAddresses[index] + Offset.EconEntity.AttributeManager
+			+ Offset.WeaponBaseData.Item + Offset.WeaponBaseData.ItemDefinitionIndex, sizeof(short));
+		entityIndices.push_back(index);
+	}
+
+	if (requests.empty())
+		return true;
+
+	std::vector<short> weaponIndices(requests.size(), -1);
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, weaponIndices.data()))
+		return false;
+
+	for (size_t index = 0; index < entityIndices.size(); ++index)
+		entities[entityIndices[index]].second.Pawn.WeaponName = CEntity::GetWeaponName(weaponIndices[index]);
 
 	return true;
 }

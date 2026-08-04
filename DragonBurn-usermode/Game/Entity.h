@@ -127,7 +127,7 @@ public:
 		if (it != weaponNames.end()) {
 			return it->second;
 		}
-		return "Weapon_None";
+		return weaponID >= 0 ? "weapon_" + std::to_string(weaponID) : "Weapon_None";
 	}
 
 };
@@ -153,6 +153,8 @@ private:
 		std::vector<DWORD64>& weaponServiceAddresses,
 		std::vector<DWORD64>& aimPunchServiceAddresses,
 		std::vector<DWORD64>& cameraAddresses);
+	bool ProcessRadarWeaponNames(std::vector<std::pair<int, CEntity>>& entities,
+		const std::vector<DWORD64>& weaponAddresses);
 
 	// Phase 2: Pointer-dependent pawn data
 	bool ProcessServiceData(std::vector<std::pair<int, CEntity>>& entities,
