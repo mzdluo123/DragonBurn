@@ -212,8 +212,10 @@ export default function RadarScene({ snapshot, map, selectedLayer, onRenderError
         groups.current.forEach((player) => updateMarker(player, false, metadata, markerFrame));
         groups.other.forEach((player) => updateMarker(player, true, metadata, markerFrame));
       }
-      markers.forEach((marker) => {
-        if (marker.lastFrame !== markerFrame) marker.root.hidden = true;
+      markers.forEach((marker, slot) => {
+        if (marker.lastFrame === markerFrame) return;
+        marker.root.remove();
+        markers.delete(slot);
       });
       renderer.render(scene, camera);
       animationFrame = requestAnimationFrame(animate);
