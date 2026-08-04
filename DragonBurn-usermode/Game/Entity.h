@@ -170,5 +170,7 @@ private:
 
 public:
 
+	bool ProcessRadarEntities(std::vector<std::pair<int, CEntity>>& entities,
+		const std::vector<EntityBatchData>& batchData);
 	bool ProcessAllEntities(std::vector<std::pair<int, CEntity>>& entities, const std::vector<EntityBatchData>& batchData);
 };

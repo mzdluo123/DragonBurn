@@ -474,6 +474,32 @@ bool Client::GetSensitivity()
 	return true;
 }
 
+bool EntityBatchProcessor::ProcessRadarEntities(
+	std::vector<std::pair<int, CEntity>>& entities,
+	const std::vector<EntityBatchData>& batchData) {
+
+	if (batchData.empty()) return false;
+
+	entities.clear();
+	entities.reserve(batchData.size());
+
+	// Initialize entities
+	for (const auto& data : batchData) {
+		CEntity entity;
+		entity.Controller.Address = data.controllerAddress;
+		entity.Pawn.Address = data.pawnAddress;
+		entities.emplace_back(data.entityIndex, std::move(entity));
+	}
+
+	std::vector<DWORD64> weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses;
+	if (!ProcessCoreEntityData(entities, weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses)) {
+		entities.clear();
+		return false;
+	}
+
+	return true;
+}
+
 bool EntityBatchProcessor::ProcessAllEntities(
 	std::vector<std::pair<int, CEntity>>& entities,
 	const std::vector<EntityBatchData>& batchData) {

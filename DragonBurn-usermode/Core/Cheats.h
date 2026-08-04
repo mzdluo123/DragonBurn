@@ -25,7 +25,7 @@ namespace Cheats
 
 	void Run();
 	
-	std::vector<std::pair<int, CEntity>> CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex);
+	std::vector<std::pair<int, CEntity>> CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex, bool radarOnly = false);
 	std::vector<EntityResult> ProcessEntities(CEntity& localEntity, int& localPlayerControllerIndex);
 	void HandleEnts(const std::vector<EntityResult>& entities, CEntity& localEntity,
 		int localPlayerControllerIndex, Base_Radar& gameRadar,

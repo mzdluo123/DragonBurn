@@ -17,7 +17,7 @@ export function useRadarSocket(): RadarSocketState {
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [protocolError, setProtocolError] = useState<string | null>(null);
   const lastSequence = useRef<number | null>(null);
-  const lastSequenceAt = useRef(0);
+  const lastMessageAt = useRef(0);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -46,16 +46,18 @@ export function useRadarSocket(): RadarSocketState {
           return;
         }
         setProtocolError(null);
+        lastMessageAt.current = performance.now();
         if (lastSequence.current !== next.seq) {
           lastSequence.current = next.seq;
-          lastSequenceAt.current = performance.now();
+          setSnapshot(next.inGame ? next : null);
         }
-        setSnapshot(next.inGame ? next : null);
       };
       socket.onclose = () => {
         if (disposed) return;
         setStatus("disconnected");
         setSnapshot(null);
+        lastSequence.current = null;
+        lastMessageAt.current = 0;
         const delay = reconnectDelays[Math.min(reconnectAttempt, reconnectDelays.length - 1)];
         reconnectAttempt += 1;
         reconnectTimer = window.setTimeout(connect, delay);
@@ -65,8 +67,8 @@ export function useRadarSocket(): RadarSocketState {
 
     connect();
     const expiryTimer = window.setInterval(() => {
-      if (lastSequenceAt.current !== 0 && isSnapshotExpired(lastSequenceAt.current, performance.now())) {
-        lastSequenceAt.current = 0;
+      if (lastMessageAt.current !== 0 && isSnapshotExpired(lastMessageAt.current, performance.now())) {
+        lastMessageAt.current = 0;
         setSnapshot(null);
       }
     }, 50);
@@ -75,6 +77,8 @@ export function useRadarSocket(): RadarSocketState {
       disposed = true;
       window.clearInterval(expiryTimer);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      lastSequence.current = null;
+      lastMessageAt.current = 0;
       socket?.close();
     };
   }, []);

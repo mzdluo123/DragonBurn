@@ -115,7 +115,7 @@ void Cheats::Run()
 	if (!backgroundRadarOnly && matrixReady && clientDataReady && (localPawnReady || MenuConfig::WorkInSpec))
 		entityResults = ProcessEntities(LocalEntity, LocalPlayerControllerIndex);
 	else
-		CollectEntityData(LocalEntity, LocalPlayerControllerIndex);
+		CollectEntityData(LocalEntity, LocalPlayerControllerIndex, backgroundRadarOnly);
 	if (!localRadarPawnReady)
 	{
 		WebRadar::Invalidate();
@@ -167,7 +167,7 @@ void Cheats::Run()
 }
 
 // collect entity data
-std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex)
+	std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex, bool radarOnly)
 {
 	// update only on new tick
 	//if (m_currentTick == m_previousTick)
@@ -212,10 +212,13 @@ std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEnt
 		return {};
 	}
 
-	// process all entities in batch
+	// process entities in batch
 	std::vector<std::pair<int, CEntity>> entities;
 	EntityBatchProcessor processor;
-	if (!processor.ProcessAllEntities(entities, batchData))
+	const bool processed = radarOnly
+		? processor.ProcessRadarEntities(entities, batchData)
+		: processor.ProcessAllEntities(entities, batchData);
+	if (!processed)
 	{
 		cachedResults.clear();
 		WebRadar::Invalidate();
@@ -232,7 +235,7 @@ std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEnt
 std::vector<EntityResult> Cheats::ProcessEntities(CEntity& localEntity, int& localPlayerControllerIndex)
 {
 	// get batch-processed entities
-	auto entities = CollectEntityData(localEntity, localPlayerControllerIndex);
+	auto entities = CollectEntityData(localEntity, localPlayerControllerIndex, false);
 	std::vector<EntityResult> results;
 	results.reserve(entities.size());
 
