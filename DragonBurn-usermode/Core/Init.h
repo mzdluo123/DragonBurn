@@ -49,40 +49,6 @@ namespace Init
         //}
 
 
-        static int ExecuteMapper(bool secureMode, bool legacyImg, bool forceprefs)
-        {
-            STARTUPINFOW startupInfo{ sizeof(STARTUPINFOW) };
-            PROCESS_INFORMATION processInfo{};
-            startupInfo.dwFlags = STARTF_USESHOWWINDOW;
-            startupInfo.wShowWindow = SW_SHOW;
-
-            std::wstring commandLine = L"VoidSpectre-Mapper.exe"
-                + std::wstring(secureMode ? L" --securemode" : L"")
-                + std::wstring(legacyImg ? L" --legacyimg" : L"")
-                + std::wstring(forceprefs ? L" --forceprefs" : L"");
-
-            const BOOL success = CreateProcessW(
-                nullptr,
-                commandLine.data(),
-                nullptr,
-                nullptr,
-                FALSE,
-                CREATE_NEW_CONSOLE,
-                nullptr,
-                nullptr,
-                &startupInfo,
-                &processInfo);
-
-            if (!success)
-                return -1;
-
-            WaitForSingleObject(processInfo.hProcess, INFINITE);
-            DWORD exitCode = static_cast<DWORD>(-1);
-            GetExitCodeProcess(processInfo.hProcess, &exitCode);
-            CloseHandle(processInfo.hProcess);
-            CloseHandle(processInfo.hThread);
-            return static_cast<int>(exitCode);
-        }
 
 	};
 

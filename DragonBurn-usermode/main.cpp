@@ -25,43 +25,41 @@
 using namespace std;
 
 namespace fs = filesystem;
-bool secureMode = false;
-bool legacyImg = false;
-bool forceprefs = false;
-
 void Cheat();
-bool CheckArg(const int& argc, char** argv, const std::string& value);
 
-int main(int argc, char* argv[])
+int main()
 {
-	secureMode = CheckArg(argc, argv, "securemode");
-	legacyImg = CheckArg(argc, argv, "legacyimg");
-	forceprefs = CheckArg(argc, argv, "forceprefs");
-
-//do not use uaicess for debugging/profiling (uiacess restarts the cheat)
-#ifndef DBDEBUG
-	DWORD err = PrepareForUIAccess();
-	if (err != ERROR_SUCCESS)
+	if (!memoryManager.Initialize())
 	{
-		MessageBoxA(NULL, "Failed to elevate to UIAccess.", "Error", MB_OK);
+		Log::Error(memoryManager.GetLastError(), false, false);
 		return -1;
+	}
+
+	const MemoryBackendKind backendKind = memoryManager.GetBackendKind();
+	if (backendKind == MemoryBackendKind::Driver)
+		Log::Info("Using DragonBurn driver memory backend");
+	else
+		Log::Info("Using MemProcFS FPGA memory backend");
+
+// Do not use UIAccess for debugging/profiling (UIAccess restarts the client).
+#ifndef DBDEBUG
+	if (backendKind == MemoryBackendKind::Driver)
+	{
+		const DWORD error = PrepareForUIAccess();
+		if (error != ERROR_SUCCESS)
+		{
+			MessageBoxA(nullptr, "Failed to elevate to UIAccess.", "Error", MB_OK);
+			memoryManager.Shutdown();
+			return -1;
+		}
 	}
 #endif
 
 	Cheat();
+	memoryManager.Shutdown();
 	return 0;
 }
 
-bool CheckArg(const int& argc, char** argv, const std::string& value)
-{
-	for (size_t i = 0; i < static_cast<size_t>(argc); ++i)
-	{
-		const std::string arg = argv[i];
-		if (arg == "--" + value || arg == "/" + value)
-			return true;
-	}
-	return false;
-}
 
 
 void Cheat()
@@ -118,52 +116,6 @@ void Cheat()
 		Log::Error(error.what());
 	}
 
-	bool mapped = false;
-CONNECT_KERNEL:
-	Log::Info("Connecting to kernel mode driver...");
-	if (memoryManager.ConnectDriver())
-	{
-		Log::PreviousLine();
-		Log::Fine("Successfully connected to kernel mode driver");
-	}
-	else
-	{
-		Log::PreviousLine();
-		if (!mapped)
-			Log::Warning("Failed to connect to kernel mode driver");
-		else
-			Log::Error("Failed to connect to kernel mode driver");
-
-		Log::Info("Triggered auto-map protocol");
-		Log::Info("Looking for kernel mapper...");
-
-		if (fs::exists("VoidSpectre-Mapper.exe"))
-		{
-			Log::PreviousLine();
-			std::string mapperInfo = "Executing kernel mapper, flags: "
-				+ std::string(secureMode ? "--securemode " : "")
-				+ std::string(legacyImg ? "--legacyimg " : "")
-				+ std::string(forceprefs ? "--forceprefs " : "")
-				+ std::string("...");
-			Log::Info(mapperInfo);
-			const int result = Init::Verify::ExecuteMapper(secureMode, legacyImg, forceprefs);
-
-			Log::PreviousLine();
-			if (result == 0)
-			{
-				Log::Fine("Successfully mapped kernel mode driver");
-				mapped = true;
-				goto CONNECT_KERNEL;
-			}
-			Log::Error("Failed to map kernel mode driver");
-		}
-		else
-		{
-			Log::PreviousLine();
-			Log::Warning("It might have been deleted by AV, turn off AV and clean temp");
-			Log::Error("Failed to find kernel mapper");
-		}
-	}
 
 	Log::Info("Waiting for CS2...");
 	DWORD pid = 0;
@@ -253,20 +205,36 @@ UPDATE_OFFSETS://UPDATE_OFFSETS
 	ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
 
-	HWND gameWindow = Init::Client::FindGameWindow(pid);
-	if (!gameWindow)
-	{
-		Log::Error("Failed to locate the CS2 game window");
-		return;
-	}
-
 	try
 	{
-		Gui.AttachAnotherWindow(gameWindow, Cheats::Run);
+		if (memoryManager.GetBackendKind() == MemoryBackendKind::Driver)
+		{
+			const HWND gameWindow = Init::Client::FindGameWindow(pid);
+			if (gameWindow == nullptr)
+				Log::Error("Failed to locate the CS2 game window", false, false);
+			else
+				Gui.AttachAnotherWindow(gameWindow, Cheats::Run);
+		}
+		else
+		{
+			const HMONITOR monitor = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+			MONITORINFO monitorInfo{ sizeof(MONITORINFO) };
+			if (monitor == nullptr || !GetMonitorInfoW(monitor, &monitorInfo))
+				throw std::runtime_error("Failed to resolve the primary monitor bounds");
+
+			const RECT& bounds = monitorInfo.rcMonitor;
+			Gui.NewWindow(
+				"VoidSpectre",
+				Vec2(static_cast<float>(bounds.left), static_cast<float>(bounds.top)),
+				Vec2(
+					static_cast<float>(bounds.right - bounds.left),
+					static_cast<float>(bounds.bottom - bounds.top)),
+				Cheats::Run);
+		}
 	}
-	catch (std::exception& error)
+	catch (const std::exception& error)
 	{
-		Log::Error(error.what());
+		Log::Error(error.what(), false, false);
 	}
 	WebRadar::Stop();
 }

@@ -1,255 +1,186 @@
 #include "MemoryMgr.h"
 
-namespace Protocol = DragonBurn::Protocol;
+#include <functional>
+#include <limits>
+#include <utility>
+#include <vector>
 
-MemoryMgr::MemoryMgr()
-{
-    ProcessID = 0;
-    kernelDriver = nullptr;
-}
+#include "DriverMemoryBackend.h"
+#include "MemProcFsMemoryBackend.h"
+#include "../Helpers/Logger.h"
 
 MemoryMgr::~MemoryMgr()
 {
-    DisconnectDriver();
-    ProcessID = 0;
-    kernelDriver = nullptr;
+    Shutdown();
 }
 
-bool MemoryMgr::ConnectDriver()
+bool MemoryMgr::Initialize()
 {
-    Protocol::DeviceNames deviceNames{};
-    if (!Protocol::BuildLocalDeviceNames(&deviceNames))
-        return false;
+    Shutdown();
+    lastError_.clear();
 
-    kernelDriver = CreateFileW(deviceNames.userPath, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (kernelDriver == INVALID_HANDLE_VALUE)
+    auto driver = std::make_unique<DriverMemoryBackend>();
+    BackendInitializationResult result = driver->Initialize();
+    if (result.status == BackendInitializationStatus::Ready)
     {
-        kernelDriver = nullptr;
+        backendKind_ = driver->Kind();
+        backend_ = std::move(driver);
+        return true;
+    }
+
+    driver->Shutdown();
+    driver.reset();
+
+    if (result.status == BackendInitializationStatus::Failed)
+    {
+        lastError_ = result.error.empty()
+            ? "DragonBurn driver initialization failed"
+            : std::move(result.error);
         return false;
     }
+
+    Log::Info("DragonBurn driver is not loaded; initializing MemProcFS FPGA backend");
+
+    auto memProcFs = std::make_unique<MemProcFsMemoryBackend>();
+    result = memProcFs->Initialize();
+    if (result.status == BackendInitializationStatus::Ready)
+    {
+        backendKind_ = memProcFs->Kind();
+        backend_ = std::move(memProcFs);
+        return true;
+    }
+
+    memProcFs->Shutdown();
+    lastError_ = result.error.empty()
+        ? "MemProcFS FPGA backend initialization failed"
+        : std::move(result.error);
+    return false;
+}
+
+void MemoryMgr::Shutdown() noexcept
+{
+    if (backend_)
+        backend_->Shutdown();
+
+    backend_.reset();
+    processId_ = 0;
+    backendKind_ = MemoryBackendKind::None;
+}
+
+MemoryBackendKind MemoryMgr::GetBackendKind() const noexcept
+{
+    return backendKind_;
+}
+
+const std::string& MemoryMgr::GetLastError() const noexcept
+{
+    return lastError_;
+}
+
+bool MemoryMgr::Attach(const DWORD processId)
+{
+    if (!backend_ || processId == 0 || !backend_->Attach(processId))
+        return false;
+
+    processId_ = processId;
     return true;
 }
 
-bool MemoryMgr::DisconnectDriver()
+DWORD64 MemoryMgr::GetModuleBase(const wchar_t* moduleName)
 {
-    if (kernelDriver != nullptr)
-    {
-        BOOL result = CloseHandle(kernelDriver);
-        kernelDriver = nullptr;
-        return result == TRUE;
-    }
-    return false;
-}
+    if (!backend_ || processId_ == 0 || moduleName == nullptr)
+        return 0;
 
-bool MemoryMgr::Attach(const DWORD pid)
-{
-    if (pid == 0 || kernelDriver == nullptr)
-        return false;
-
-
-    Protocol::Request attachRequest;
-    attachRequest.process_id = ULongToHandle(pid);
-    attachRequest.target = nullptr;
-    attachRequest.buffer = nullptr;
-    attachRequest.size = 0;
-
-    BOOL result = DeviceIoControl(kernelDriver,
-        Protocol::IoctlAttach,
-        &attachRequest,
-        sizeof(attachRequest),
-        &attachRequest,
-        sizeof(attachRequest),
-        nullptr,
-        nullptr);
-
-    if (result == TRUE)
-    {
-        ProcessID = pid;
-        return true;
-    }
-    return false;
+    return backend_->GetModuleBase(moduleName);
 }
 
 DWORD MemoryMgr::GetProcessID(const wchar_t* processName)
 {
-    if (kernelDriver == nullptr || processName == nullptr)
+    if (!backend_ || processName == nullptr)
         return 0;
 
-    Protocol::ProcessIdPacket packet{};
-    if (wcsncpy_s(packet.name, processName, _TRUNCATE) != 0)
-        return 0;
-
-    const BOOL result = DeviceIoControl(
-        kernelDriver,
-        Protocol::IoctlGetPid,
-        &packet,
-        sizeof(packet),
-        &packet,
-        sizeof(packet),
-        nullptr,
-        nullptr);
-
-    return result == TRUE ? packet.pid : 0;
-}
-DWORD64 MemoryMgr::GetModuleBase(const wchar_t* moduleName)
-{
-    if (kernelDriver == nullptr || ProcessID == 0 || moduleName == nullptr)
-        return 0;
-
-    Protocol::ModulePacket packet{};
-    packet.pid = ProcessID;
-    if (wcsncpy_s(packet.moduleName, moduleName, _TRUNCATE) != 0)
-        return 0;
-
-    const BOOL result = DeviceIoControl(
-        kernelDriver,
-        Protocol::IoctlGetModuleBase,
-        &packet,
-        sizeof(packet),
-        &packet,
-        sizeof(packet),
-        nullptr,
-        nullptr);
-
-    return result == TRUE ? packet.baseAddress : 0;
+    return backend_->GetProcessId(processName);
 }
 
-/*
-DWORD64 MemoryMgr::TraceAddress(DWORD64 baseAddress, std::vector<DWORD> offsets)
+bool MemoryMgr::ReadMemoryBytes(
+    const DWORD64 address,
+    const std::span<std::byte> output,
+    const MemoryReadPolicy policy)
 {
-    if (kernelDriver == nullptr || ProcessID == 0)
-        return 0;
-
-    if (baseAddress == 0 || baseAddress >= 0x7FFFFFFFFFFF)
-        return 0;
-
-    uint64_t address = baseAddress;
-    if (offsets.empty())
-        return baseAddress;
-
-    uint64_t buffer = 0;
-    if (!ReadMemory(address, buffer))
-        return 0;
-
-    for (size_t i = 0; i < offsets.size() - 1; i++)
-    {
-        if (buffer == 0 || buffer >= 0x7FFFFFFFFFFF)
-            return 0;
-
-        address = buffer + offsets[i];
-
-        if (address < buffer)
-            return 0;
-
-        if (!ReadMemory(address, buffer))
-            return 0;
-    }
-
-    if (buffer == 0 || buffer >= 0x7FFFFFFFFFFF)
-        return 0;
-
-    uint64_t finalAddress = buffer + offsets.back();
-    return (finalAddress < buffer) ? 0 : finalAddress; // Check overflow
-}
-*/
-
-bool MemoryMgr::BatchReadMemory(const std::vector<std::pair<DWORD64, SIZE_T>>& requests, void* output_buffer)
-{
-    if (kernelDriver == nullptr || ProcessID == 0 || output_buffer == nullptr || requests.empty() ||
-        requests.size() > Protocol::MaxBatchRequests)
+    constexpr DWORD64 HighestUserAddress = 0x7FFFFFFFFFFFULL;
+    if (!backend_ || processId_ == 0 || address == 0 || address >= HighestUserAddress ||
+        output.data() == nullptr || output.empty() || output.size() > MaxSingleMemoryReadSize ||
+        address > (std::numeric_limits<DWORD64>::max)() - output.size())
     {
         return false;
     }
 
-    SIZE_T outputDataSize = 0;
-    for (const auto& request : requests)
+    return backend_->Read(address, output, policy);
+}
+
+bool MemoryMgr::ValidateBatch(
+    const std::span<const MemoryReadRequest> requests,
+    const std::span<std::byte> output,
+    const std::span<SIZE_T> offsets) const noexcept
+{
+    if (!backend_ || processId_ == 0 || requests.empty() ||
+        requests.size() > MaxBatchMemoryRequests || output.data() == nullptr || output.empty() ||
+        (!offsets.empty() && offsets.size() != requests.size() + 1))
     {
-        if (request.first == 0 || request.second == 0 || request.second > Protocol::MaxSingleReadSize ||
-            request.first + request.second < request.first ||
-            request.second > Protocol::MaxBatchOutputSize - outputDataSize)
+        return false;
+    }
+
+    SIZE_T outputSize = 0;
+    if (!offsets.empty())
+        offsets[0] = 0;
+
+    for (size_t index = 0; index < requests.size(); ++index)
+    {
+        const MemoryReadRequest& request = requests[index];
+        if (request.address == 0 || request.size == 0 || request.size > MaxSingleMemoryReadSize ||
+            request.address > (std::numeric_limits<DWORD64>::max)() - request.size ||
+            request.size > MaxBatchMemoryOutputSize - outputSize)
         {
             return false;
         }
 
-        outputDataSize += request.second;
+        outputSize += request.size;
+        if (!offsets.empty())
+            offsets[index + 1] = outputSize;
     }
 
-    const SIZE_T requestStructureSize = sizeof(Protocol::BatchReadHeader) +
-        requests.size() * sizeof(Protocol::BatchReadRequest);
-    const SIZE_T totalBufferSize = requestStructureSize + outputDataSize;
-    if (totalBufferSize < requestStructureSize || totalBufferSize > MAXDWORD)
+    return outputSize == output.size();
+}
+
+bool MemoryMgr::BatchReadMemory(
+    const std::span<const MemoryReadRequest> requests,
+    const std::span<std::byte> output,
+    const MemoryReadPolicy policy)
+{
+    if (!ValidateBatch(requests, output, {}))
         return false;
 
-    std::vector<BYTE> operationBuffer(totalBufferSize);
-    auto header = reinterpret_cast<Protocol::BatchReadHeader*>(operationBuffer.data());
-    auto batchRequests = reinterpret_cast<Protocol::BatchReadRequest*>(header + 1);
-
-    header->process_id = ULongToHandle(ProcessID);
-    header->num_requests = static_cast<UINT32>(requests.size());
-    header->total_buffer_size = outputDataSize;
-
-    SIZE_T bufferOffset = 0;
-    for (size_t index = 0; index < requests.size(); ++index)
-    {
-        batchRequests[index].address = requests[index].first;
-        batchRequests[index].size = requests[index].second;
-        batchRequests[index].offset_in_buffer = bufferOffset;
-        bufferOffset += requests[index].second;
-    }
-
-    const BOOL result = DeviceIoControl(
-        kernelDriver,
-        Protocol::IoctlBatchRead,
-        operationBuffer.data(),
-        static_cast<DWORD>(totalBufferSize),
-        operationBuffer.data(),
-        static_cast<DWORD>(totalBufferSize),
-        nullptr,
-        nullptr);
-
-    if (result == TRUE)
-    {
-        const BYTE* outputStart = operationBuffer.data() + requestStructureSize;
-        memcpy(output_buffer, outputStart, outputDataSize);
-    }
-
-    return result == TRUE;
+    return backend_->ReadBatch(requests, output, policy);
 }
 
 bool MemoryMgr::BatchReadMemoryBestEffort(
-    const std::vector<std::pair<DWORD64, SIZE_T>>& requests,
-    void* output_buffer)
+    const std::span<const MemoryReadRequest> requests,
+    const std::span<std::byte> output,
+    const MemoryReadPolicy policy)
 {
-    if (kernelDriver == nullptr || ProcessID == 0 || output_buffer == nullptr || requests.empty() ||
-        requests.size() > Protocol::MaxBatchRequests)
-    {
-        return false;
-    }
-
     std::vector<SIZE_T> outputOffsets(requests.size() + 1, 0);
-    for (size_t index = 0; index < requests.size(); ++index)
-    {
-        const auto& request = requests[index];
-        if (request.first == 0 || request.second == 0 || request.second > Protocol::MaxSingleReadSize ||
-            request.first + request.second < request.first ||
-            request.second > Protocol::MaxBatchOutputSize - outputOffsets[index])
-        {
-            return false;
-        }
+    if (!ValidateBatch(requests, output, outputOffsets))
+        return false;
 
-        outputOffsets[index + 1] = outputOffsets[index] + request.second;
-    }
-
-    auto* output = static_cast<BYTE*>(output_buffer);
     size_t successfulRequests = 0;
-
-    const auto readRange = [&](auto&& self, size_t begin, size_t end) -> void
+    const auto readRange = [&](auto&& self, const size_t begin, const size_t end) -> void
     {
-        std::vector<std::pair<DWORD64, SIZE_T>> rangeRequests(
-            requests.begin() + begin,
-            requests.begin() + end);
-
-        if (BatchReadMemory(rangeRequests, output + outputOffsets[begin]))
+        const SIZE_T rangeOffset = outputOffsets[begin];
+        const SIZE_T rangeSize = outputOffsets[end] - rangeOffset;
+        if (backend_->ReadBatch(
+            requests.subspan(begin, end - begin),
+            output.subspan(rangeOffset, rangeSize),
+            policy))
         {
             successfulRequests += end - begin;
             return;
@@ -257,7 +188,7 @@ bool MemoryMgr::BatchReadMemoryBestEffort(
 
         if (end - begin == 1)
         {
-            SecureZeroMemory(output + outputOffsets[begin], requests[begin].second);
+            SecureZeroMemory(output.data() + rangeOffset, rangeSize);
             return;
         }
 

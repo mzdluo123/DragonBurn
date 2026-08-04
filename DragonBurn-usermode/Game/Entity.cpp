@@ -568,7 +568,7 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 	std::vector<DWORD64>& aimPunchServiceAddresses,
 	std::vector<DWORD64>& cameraAddresses) {
 
-	std::vector<std::pair<DWORD64, SIZE_T>> requests;
+	std::vector<MemoryReadRequest> requests;
 	requests.reserve(entities.size() * 21); // 6 controller + 15 pawn fields per entity
 
 	// Build all requests for Phase 1
@@ -603,11 +603,11 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 	// Calculate total buffer size
 	SIZE_T totalSize = 0;
 	for (const auto& req : requests) {
-		totalSize += req.second;
+		totalSize += req.size;
 	}
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data())) {
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer }))) {
 		return false;
 	}
 
@@ -716,7 +716,7 @@ bool EntityBatchProcessor::ProcessRadarWeaponNames(
 	std::vector<std::pair<int, CEntity>>& entities,
 	const std::vector<DWORD64>& weaponAddresses) {
 
-	std::vector<std::pair<DWORD64, SIZE_T>> requests;
+	std::vector<MemoryReadRequest> requests;
 	std::vector<size_t> entityIndices;
 	requests.reserve(weaponAddresses.size());
 	entityIndices.reserve(weaponAddresses.size());
@@ -735,7 +735,7 @@ bool EntityBatchProcessor::ProcessRadarWeaponNames(
 		return true;
 
 	std::vector<short> weaponIndices(requests.size(), -1);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, weaponIndices.data()))
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ weaponIndices })))
 		return false;
 
 	for (size_t index = 0; index < entityIndices.size(); ++index)
@@ -750,7 +750,7 @@ bool EntityBatchProcessor::ProcessServiceData(
 	const std::vector<DWORD64>& aimPunchServiceAddresses,
 	std::vector<DWORD64>& weaponAddresses) {
 
-	std::vector<std::pair<DWORD64, SIZE_T>> requests;
+	std::vector<MemoryReadRequest> requests;
 	std::vector<std::pair<size_t, bool>> requestMap; // entity index, active weapon request
 	requests.reserve(entities.size() * 2);
 	requestMap.reserve(entities.size() * 2);
@@ -775,10 +775,10 @@ bool EntityBatchProcessor::ProcessServiceData(
 
 	SIZE_T totalSize = 0;
 	for (const auto& request : requests)
-		totalSize += request.second;
+		totalSize += request.size;
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data()))
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer })))
 		return false;
 
 	SIZE_T bufferOffset = 0;
@@ -806,7 +806,7 @@ bool EntityBatchProcessor::ProcessWeaponData(
 	const std::vector<DWORD64>& weaponAddresses,
 	std::vector<DWORD64>& weaponDataAddresses) {
 
-	std::vector<std::pair<DWORD64, SIZE_T>> requests;
+	std::vector<MemoryReadRequest> requests;
 	std::vector<size_t> validWeaponIndices;
 
 	// Build requests only for valid weapon addresses
@@ -834,11 +834,11 @@ bool EntityBatchProcessor::ProcessWeaponData(
 
 	SIZE_T totalSize = 0;
 	for (const auto& req : requests) {
-		totalSize += req.second;
+		totalSize += req.size;
 	}
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data())) {
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer }))) {
 		return false;
 	}
 
@@ -892,7 +892,7 @@ bool EntityBatchProcessor::ProcessDependenciesData(
 	const std::vector<DWORD64>& weaponDataAddresses,
 	const std::vector<DWORD64>& cameraAddresses) {
 
-	std::vector<std::pair<DWORD64, SIZE_T>> requests;
+	std::vector<MemoryReadRequest> requests;
 	std::vector/*<std::pair*/<size_t/*, bool*/> requestMap; // entityIndex, isMaxAmmo
 
 	// Build requests for max ammo and FOV
@@ -918,11 +918,11 @@ bool EntityBatchProcessor::ProcessDependenciesData(
 
 	SIZE_T totalSize = 0;
 	for (const auto& req : requests) {
-		totalSize += req.second;
+		totalSize += req.size;
 	}
 
 	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, buffer.data())) {
+	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer }))) {
 		return false;
 	}
 

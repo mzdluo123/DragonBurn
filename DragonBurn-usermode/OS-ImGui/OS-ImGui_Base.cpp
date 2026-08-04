@@ -8,6 +8,7 @@ namespace OSImGui
     bool OSImGui_Base::InitImGui(ID3D11Device* device, ID3D11DeviceContext* device_context)
     {
         ImGui::CreateContext();
+        ImGuiContextInitialized = true;
         ImGuiIO& io = ImGui::GetIO();
         io.Fonts->AddFontDefault();
         (void)io;
@@ -50,21 +51,35 @@ namespace OSImGui
 
         if (!ImGui_ImplWin32_Init(Window.hWnd))
             throw OSException("ImGui_ImplWin32_Init() call failed.");
+        ImGuiWin32Initialized = true;
         if (!ImGui_ImplDX11_Init(device, device_context))
             throw OSException("ImGui_ImplDX11_Init() call failed.");
+        ImGuiDx11Initialized = true;
 
         return true;
     }
 
     void OSImGui_Base::CleanImGui()
     {
-        ImGui_ImplDX11_Shutdown();
-        ImGui_ImplWin32_Shutdown();
-        ImGui::DestroyContext();
+        if (ImGuiDx11Initialized)
+            ImGui_ImplDX11_Shutdown();
+        ImGuiDx11Initialized = false;
+
+        if (ImGuiWin32Initialized)
+            ImGui_ImplWin32_Shutdown();
+        ImGuiWin32Initialized = false;
+
+        if (ImGuiContextInitialized)
+            ImGui::DestroyContext();
+        ImGuiContextInitialized = false;
 
         g_Device.CleanupDeviceD3D();
-        DestroyWindow(Window.hWnd);
-        UnregisterClassA(Window.ClassName.c_str(), Window.hInstance);
+        if (Window.hWnd != nullptr)
+            DestroyWindow(Window.hWnd);
+        Window.hWnd = nullptr;
+        if (Window.hInstance != nullptr && !Window.ClassName.empty())
+            UnregisterClassA(Window.ClassName.c_str(), Window.hInstance);
+        Window.hInstance = nullptr;
     }
 
     std::wstring OSImGui_Base::StringToWstring(std::string& str)

@@ -186,6 +186,15 @@
     <ClInclude Include="Core\MemoryMgr.h">
       <Filter>Core</Filter>
     </ClInclude>
+    <ClInclude Include="Core\MemoryBackend.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\DriverMemoryBackend.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\MemProcFsMemoryBackend.h">
+      <Filter>Core</Filter>
+    </ClInclude>
     <ClInclude Include="Core\Config.h">
       <Filter>Core</Filter>
     </ClInclude>
@@ -285,6 +294,12 @@
       <Filter>Features\Legit</Filter>
     </ClCompile>
     <ClCompile Include="Core\MemoryMgr.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\DriverMemoryBackend.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\MemProcFsMemoryBackend.cpp">
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="Helpers\StorageMgr.cpp">

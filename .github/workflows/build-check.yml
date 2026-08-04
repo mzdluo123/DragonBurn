@@ -33,6 +33,7 @@ jobs:
           name: VoidSpectre_${{ github.sha }}
           path: |
             D:\a\DragonBurn\DragonBurn\built\VoidSpectre.exe
+            D:\a\DragonBurn\DragonBurn\built\memprocfs\**
 
   release:
     needs: ["build"]

@@ -57,7 +57,7 @@ namespace OSImGui
 		WindowData Window;
 		WindowData DestWindow;
 	public:
-		virtual void NewWindow(std::string WindowName, Vec2 WindowSize, std::function<void()> CallBack) = 0;
+		virtual void NewWindow(std::string WindowName, Vec2 WindowPos, Vec2 WindowSize, std::function<void()> CallBack) = 0;
 		virtual void Quit() { EndFlag = true; };
 	public:
 		virtual bool CreateMyWindow() = 0;
@@ -65,5 +65,9 @@ namespace OSImGui
 		bool InitImGui(ID3D11Device* device, ID3D11DeviceContext* device_context);
 		void CleanImGui();
 		std::wstring StringToWstring(std::string& str);
+	private:
+		bool ImGuiContextInitialized = false;
+		bool ImGuiWin32Initialized = false;
+		bool ImGuiDx11Initialized = false;
 	};
 }

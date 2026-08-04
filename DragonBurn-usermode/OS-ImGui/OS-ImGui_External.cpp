@@ -95,8 +95,38 @@ namespace OSImGui
 namespace OSImGui
 {
     LRESULT WINAPI WndProc_External(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    namespace
+    {
+        class KeyboardHookGuard
+        {
+        public:
+            KeyboardHookGuard()
+            {
+                if (g_keyboard_hook != nullptr)
+                    UnhookWindowsHookEx(g_keyboard_hook);
+                g_keyboard_hook = SetWindowsHookExW(
+                    WH_KEYBOARD_LL,
+                    LowLevelKeyboardProc,
+                    GetModuleHandleW(nullptr),
+                    0);
+                if (g_keyboard_hook == nullptr)
+                    Log::Warning("Failed to install the global keyboard hook");
+            }
 
-    void OSImGui_External::NewWindow(std::string WindowName, Vec2 WindowSize, std::function<void()> CallBack)
+            ~KeyboardHookGuard()
+            {
+                if (g_keyboard_hook != nullptr)
+                    UnhookWindowsHookEx(g_keyboard_hook);
+                g_keyboard_hook = nullptr;
+            }
+
+            KeyboardHookGuard(const KeyboardHookGuard&) = delete;
+            KeyboardHookGuard& operator=(const KeyboardHookGuard&) = delete;
+        };
+    }
+
+
+    void OSImGui_External::NewWindow(std::string WindowName, Vec2 WindowPos, Vec2 WindowSize, std::function<void()> CallBack)
     {
         if (!CallBack)
             throw OSException("CallBack is empty");
@@ -106,7 +136,9 @@ namespace OSImGui
         Window.wName = StringToWstring(Window.Name);
         Window.ClassName = "WindowClass";
         Window.wClassName = StringToWstring(Window.ClassName);
+        Window.Pos = WindowPos;
         Window.Size = WindowSize;
+        Window.BgColor = ImColor(0, 0, 0, 255);
 
         Type = NEW;
         CallBackFn = std::move(CallBack);
@@ -114,13 +146,17 @@ namespace OSImGui
         if (!CreateMyWindow())
             throw OSException("CreateMyWindow() call failed");
 
-        try {
+        try
+        {
             InitImGui(g_Device.g_pd3dDevice, g_Device.g_pd3dDeviceContext);
         }
-        catch (const OSException&) {
-            throw; // Re-throw without copying
+        catch (...)
+        {
+            CleanImGui();
+            throw;
         }
 
+        KeyboardHookGuard keyboardHook;
         MainLoop();
     }
 
@@ -173,15 +209,18 @@ namespace OSImGui
         if (!CreateMyWindow())
             throw OSException("CreateMyWindow() call failed");
 
-        try {
+        try
+        {
             InitImGui(g_Device.g_pd3dDevice, g_Device.g_pd3dDeviceContext);
         }
-        catch (const OSException&) {
+        catch (...)
+        {
+            CleanImGui();
             throw;
         }
 
         RegisterRawInput(Window.hWnd);
-        g_keyboard_hook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(NULL), 0);
+        KeyboardHookGuard keyboardHook;
         MainLoop();
     }
 
@@ -283,6 +322,12 @@ namespace OSImGui
 
     void OSImGui_External::MainLoop()
     {
+        struct CleanupGuard
+        {
+            OSImGui_External& owner;
+            ~CleanupGuard() { owner.CleanImGui(); }
+        } cleanupGuard{ *this };
+
 
         // Cache frequently used values
         constexpr DWORD excludeCapture = WDA_EXCLUDEFROMCAPTURE;
@@ -295,6 +340,15 @@ namespace OSImGui
 
             if (Type == ATTACH && !UpdateWindowData()) 
                 break;
+            if (Type == NEW)
+            {
+                RECT clientRect{};
+                if (!IsWindow(Window.hWnd) || !GetClientRect(Window.hWnd, &clientRect))
+                    break;
+                Window.Size = Vec2(
+                    static_cast<float>(clientRect.right - clientRect.left),
+                    static_cast<float>(clientRect.bottom - clientRect.top));
+            }
 
             // Keep the frame callback running while the attached game window is
             // unfocused. Cheats::Run uses this path to refresh the web radar,
@@ -372,7 +426,6 @@ namespace OSImGui
                 ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
             g_Device.g_pSwapChain->Present(1, 0);
         }
-        CleanImGui();
     }
 
     bool OSImGui_External::CreateMyWindow()
@@ -401,56 +454,77 @@ namespace OSImGui
         windowClass.hInstance = hInstance;
         windowClass.lpszClassName = Window.wClassName.c_str();
 
-        // Load CreateWindowInBand function pointer (cache it statically)
-        static auto pCreateWindowInBand = []() -> auto {
+        const ATOM classAtom = RegisterClassExW(&windowClass);
+        if (classAtom == 0)
+            return false;
+
+        if (Type == ATTACH)
+        {
+#ifndef DBDEBUG
             using CreateWindowInBandFunc = HWND(WINAPI*)(
                 DWORD, ATOM, LPCWSTR, DWORD, int, int, int, int,
                 HWND, HMENU, HINSTANCE, LPVOID, DWORD);
-
-            return reinterpret_cast<CreateWindowInBandFunc>(
+            static const auto createWindowInBand = reinterpret_cast<CreateWindowInBandFunc>(
                 GetProcAddress(GetModuleHandleW(L"user32.dll"), "CreateWindowInBand"));
-            }();
+            if (createWindowInBand == nullptr)
+            {
+                MessageBoxW(nullptr, L"CreateWindowInBand is not supported on this OS.", L"Error", MB_OK | MB_ICONERROR);
+                UnregisterClassW(windowClass.lpszClassName, hInstance);
+                return false;
+            }
 
-        if (!pCreateWindowInBand) {
-            MessageBoxW(nullptr, L"CreateWindowInBand is not supported on this OS.", L"Error", MB_OK | MB_ICONERROR);
-            return false;
-        }
-
-        // Register the window class
-        ATOM classAtom = RegisterClassExW(&windowClass);
-        if (!classAtom) {
-            return false;
-        }
-
-//do not use uaicess for debugging/profiling (uiacess restarts the cheat)
-#ifndef DBDEBUG
-        // Create the window with cached values
-        constexpr DWORD exStyle = WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
-        constexpr DWORD style = WS_POPUP;
-
-        Window.hWnd = pCreateWindowInBand(
-            exStyle, classAtom, Window.wName.c_str(), style,
-            static_cast<int>(Window.Pos.x), static_cast<int>(Window.Pos.y),
-            static_cast<int>(Window.Size.x), static_cast<int>(Window.Size.y),
-            nullptr, nullptr, hInstance, nullptr, 2
-        );
-
+            Window.hWnd = createWindowInBand(
+                WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+                classAtom,
+                Window.wName.c_str(),
+                WS_POPUP,
+                static_cast<int>(Window.Pos.x),
+                static_cast<int>(Window.Pos.y),
+                static_cast<int>(Window.Size.x),
+                static_cast<int>(Window.Size.y),
+                nullptr,
+                nullptr,
+                hInstance,
+                &Window,
+                2);
 #else
-        if (Type == ATTACH)
-        {
-            Window.hWnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW, Window.wClassName.c_str(), Window.wName.c_str(), WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, nullptr, nullptr, hInstance, nullptr);
+            Window.hWnd = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+                Window.wClassName.c_str(),
+                Window.wName.c_str(),
+                WS_POPUP,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                100,
+                100,
+                nullptr,
+                nullptr,
+                hInstance,
+                &Window);
             SetLayeredWindowAttributes(Window.hWnd, 0, 255, LWA_ALPHA);
+#endif
         }
         else
         {
-            Window.hWnd = CreateWindowW(Window.wClassName.c_str(), Window.wName.c_str(), WS_OVERLAPPED | WS_MINIMIZEBOX | WS_SYSMENU, static_cast<int>(Window.Pos.x), static_cast<int>(Window.Pos.y), static_cast<int>(Window.Size.x), static_cast<int>(Window.Size.y), nullptr, nullptr, hInstance, nullptr);
+            Window.hWnd = CreateWindowExW(
+                WS_EX_APPWINDOW,
+                Window.wClassName.c_str(),
+                Window.wName.c_str(),
+                WS_POPUP,
+                static_cast<int>(Window.Pos.x),
+                static_cast<int>(Window.Pos.y),
+                static_cast<int>(Window.Size.x),
+                static_cast<int>(Window.Size.y),
+                nullptr,
+                nullptr,
+                hInstance,
+                &Window);
         }
-#endif
 
         Window.hInstance = hInstance;
 
         if (!Window.hWnd) {
-            MessageBoxW(nullptr, L"CreateWindowInBand failed.", L"Error", MB_OK | MB_ICONERROR);
+            MessageBoxW(nullptr, L"Window creation failed.", L"Error", MB_OK | MB_ICONERROR);
             UnregisterClassW(windowClass.lpszClassName, hInstance);
             return false;
         }
@@ -462,8 +536,10 @@ namespace OSImGui
             return false;
         }
 
-        ShowWindow(Window.hWnd, SW_SHOWDEFAULT);
+        ShowWindow(Window.hWnd, SW_SHOW);
         UpdateWindow(Window.hWnd);
+        if (Type == NEW)
+            SetForegroundWindow(Window.hWnd);
 
         return true;
     }
@@ -535,6 +611,15 @@ namespace OSImGui
 
         switch (msg)
         {
+        case WM_NCCREATE:
+        {
+            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(
+                hWnd,
+                GWLP_USERDATA,
+                reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+            return TRUE;
+        }
         case WM_CREATE:
         {
             constexpr MARGINS margin = { -1, -1, -1, -1 };
@@ -542,14 +627,27 @@ namespace OSImGui
             break;
         }
         case WM_SIZE:
-            if (g_Device.g_pd3dDevice && wParam != SIZE_MINIMIZED)
+            if (wParam != SIZE_MINIMIZED)
             {
-                g_Device.CleanupRenderTarget();
-                g_Device.g_pSwapChain->ResizeBuffers(0,
-                    static_cast<UINT>(LOWORD(lParam)),
-                    static_cast<UINT>(HIWORD(lParam)),
-                    DXGI_FORMAT_UNKNOWN, 0);
-                g_Device.CreateRenderTarget();
+                if (auto* window = reinterpret_cast<WindowData*>(
+                    GetWindowLongPtrW(hWnd, GWLP_USERDATA)))
+                {
+                    window->Size = Vec2(
+                        static_cast<float>(LOWORD(lParam)),
+                        static_cast<float>(HIWORD(lParam)));
+                }
+
+                if (g_Device.g_pd3dDevice)
+                {
+                    g_Device.CleanupRenderTarget();
+                    g_Device.g_pSwapChain->ResizeBuffers(
+                        0,
+                        static_cast<UINT>(LOWORD(lParam)),
+                        static_cast<UINT>(HIWORD(lParam)),
+                        DXGI_FORMAT_UNKNOWN,
+                        0);
+                    g_Device.CreateRenderTarget();
+                }
             }
             return 0;
         case WM_SYSCOMMAND:

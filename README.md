@@ -141,23 +141,24 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -T v143
 cmake --build build --config Release --parallel
 ```
 
-Use `--config Debug` for a debug build. CMake builds the user-mode client and mapper directly, and invokes the WDK `.vcxproj` for the kernel driver. It writes the following three Release outputs to `built/` (`built_dbg/` for Debug):
+Use `--config Debug` for a debug build. CMake builds the user-mode client and mapper directly, and invokes the WDK `.vcxproj` for the kernel driver. Release outputs go to `built/` (`built_dbg/` for Debug):
 
 - `VoidSpectre.exe`
 - `VoidSpectre-Mapper.exe`
 - `VoidSpectre-Core.sys`
+- `memprocfs/`, containing the required FPGA runtime DLLs, `info.db`, and license files
 
-Run `VoidSpectre.exe` as administrator. It derives the host-specific device path (`\\.\<32 hexadecimal characters>`) from the active computer name, connects to it, and, if unavailable, launches `VoidSpectre-Mapper.exe`, waits for the mapper to finish, and reconnects automatically.
+Run `VoidSpectre.exe` as administrator. Startup is driver-first: if the host-derived DragonBurn device is already loaded and accessible, the client uses it and attaches the overlay to the local CS2 window. If and only if the device does not exist, the client loads the adjacent `memprocfs/` runtime and connects to the target through PCILeech FPGA. Driver access errors fail startup instead of switching to a different memory view.
+
+The FPGA fallback requires the FT601 kernel driver on the analysis computer, a supported FPGA connected to the target computer, and the complete `built/memprocfs/` directory beside `VoidSpectre.exe`. In this mode process/module discovery and all reads come from MemProcFS. Rendering uses an opaque borderless full-screen window on the analysis computer; ESP, radar, menu, spectator/bomb/sound displays, and WebRadar remain read-only. Aimbot, RCS, trigger, bunny-hop, AutoAccept, knife/zeus, and other game-input paths are disabled.
 
 After the client finishes startup, open `http://127.0.0.1:16668` on the same computer. The web radar is loopback-only; it streams player snapshots over WebSocket and downloads validated map assets into `Documents\DragonBurn\Data\WebRadarMaps` on demand.
 
-The mapper restores the original Intel vulnerable-driver loading flow. When `cfg::image` is empty, it reads `VoidSpectre-Core.sys` from its own directory. Embedded and encrypted `cfg::image` data remains supported.
+The mapper remains a separate, manually invoked product. When `cfg::image` is empty, it reads `VoidSpectre-Core.sys` from its own directory. Embedded and encrypted `cfg::image` data remains supported. Run it before `VoidSpectre.exe` when the driver backend is desired. Its options are:
 
-Supported user-mode flags are forwarded to the mapper:
-
-- `--securemode`: allocate independent pages and apply per-section protection.
-- `--legacyimg`: use embedded `cfg::imageLegacy`, or `VoidSpectre-Core-legacy.sys` beside the mapper.
-- `--forceprefs`: force the original Windows kernel-preference prompt.
+- `VoidSpectre-Mapper.exe --securemode`: allocate independent pages and apply per-section protection.
+- `VoidSpectre-Mapper.exe --legacyimg`: use embedded `cfg::imageLegacy`, or `VoidSpectre-Core-legacy.sys` beside the mapper.
+- `VoidSpectre-Mapper.exe --forceprefs`: force the original Windows kernel-preference prompt.
 
 `VoidSpectre-Core.sys` supports both entry paths: normal Service Control Manager loading and kdmapper-style invocation with null `DriverObject`/`RegistryPath` parameters. Both paths derive the same case-insensitive host-specific token before registering the driver object, device, symbolic link, and IOCTL dispatch table. The device ACL continues to grant access only to SYSTEM and administrators.
 

@@ -73,6 +73,7 @@ set(DRAGONBURN_INCLUDES
     "${USERMODE_DIR}/OS-ImGui/stb"
     "${USERMODE_DIR}"
     "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/memprocfs"
 )
 
 # Source files for main app
@@ -88,6 +89,8 @@ set(DRAGONBURN_SOURCES
     Core/Cheats.cpp
     Core/GlobalVars.cpp
     Core/MemoryMgr.cpp
+    Core/DriverMemoryBackend.cpp
+    Core/MemProcFsMemoryBackend.cpp
     
     # Features
     Features/Aimbot.cpp
@@ -142,6 +145,9 @@ set(DRAGONBURN_HEADERS
     Core/GUI.h
     Core/Init.h
     Core/MemoryMgr.h
+    Core/MemoryBackend.h
+    Core/DriverMemoryBackend.h
+    Core/MemProcFsMemoryBackend.h
     Core/Render.h
     
     # Features
@@ -282,6 +288,34 @@ target_link_libraries(DragonBurn-usermode PRIVATE
     odbccp32
     ws2_32
     winhttp
+)
+
+set(MEMPROCFS_RUNTIME_FILES
+    "${CMAKE_SOURCE_DIR}/memprocfs/vmm.dll"
+    "${CMAKE_SOURCE_DIR}/memprocfs/leechcore.dll"
+    "${CMAKE_SOURCE_DIR}/memprocfs/leechcore_driver.dll"
+    "${CMAKE_SOURCE_DIR}/memprocfs/FTD3XX.dll"
+    "${CMAKE_SOURCE_DIR}/memprocfs/FTD3XXWU.dll"
+    "${CMAKE_SOURCE_DIR}/memprocfs/vcruntime140.dll"
+    "${CMAKE_SOURCE_DIR}/memprocfs/info.db"
+    "${CMAKE_SOURCE_DIR}/memprocfs/LICENSE.txt"
+    "${CMAKE_SOURCE_DIR}/memprocfs/license_info_all.txt"
+    "${CMAKE_SOURCE_DIR}/memprocfs/redist_vcruntime.txt"
+)
+
+foreach(MEMPROCFS_RUNTIME_FILE IN LISTS MEMPROCFS_RUNTIME_FILES)
+    if(NOT EXISTS "${MEMPROCFS_RUNTIME_FILE}")
+        message(FATAL_ERROR "Missing required MemProcFS runtime file: ${MEMPROCFS_RUNTIME_FILE}")
+    endif()
+endforeach()
+
+add_custom_command(TARGET DragonBurn-usermode POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:DragonBurn-usermode>/memprocfs"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${MEMPROCFS_RUNTIME_FILES}
+        "$<TARGET_FILE_DIR:DragonBurn-usermode>/memprocfs"
+    COMMENT "Staging MemProcFS FPGA runtime"
+    VERBATIM
 )
 
 enable_testing()

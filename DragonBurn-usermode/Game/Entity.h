@@ -145,7 +145,6 @@ struct EntityBatchData {
 class EntityBatchProcessor {
 private:
 	std::vector<EntityBatchData> entityBatchData;
-	std::vector<std::pair<DWORD64, SIZE_T>> allRequests;
 	std::vector<BYTE> masterBuffer;
 
 	// Phase 1: Controller + core pawn data

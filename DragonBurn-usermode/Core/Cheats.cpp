@@ -39,7 +39,7 @@ void Visual(const CEntity&);
 void Radar(Base_Radar, const CEntity&);
 void Trigger(const CEntity&, const int&);
 void AIM(const CEntity&, const std::vector<AimControl::AimCandidate>&);
-void MiscFuncs(CEntity&);
+void MiscFuncs(CEntity&, bool);
 void RenderCrosshair(ImDrawList*, const CEntity&);
 void RadarSetting(Base_Radar&);
 
@@ -47,11 +47,21 @@ void Cheats::Run()
 {	
 	Menu();
 
-	Misc::AutoAccept::UpdateAutoAccept();
+	const bool allowGameInput = memoryManager.GetBackendKind() == MemoryBackendKind::Driver;
+	if (allowGameInput)
+	{
+		Misc::AutoAccept::UpdateAutoAccept();
+	}
+	else
+	{
+		AimControl::ResetRuntime();
+		RCS::ResetRuntime();
+	}
 
 	const HWND foregroundWindow = GetForegroundWindow();
-	const bool backgroundRadarOnly = foregroundWindow != Init::Client::GetGameWindow()
-		&& foregroundWindow != Gui.Window.hWnd;
+	const bool backgroundRadarOnly = allowGameInput
+		? foregroundWindow != Init::Client::GetGameWindow() && foregroundWindow != Gui.Window.hWnd
+		: foregroundWindow != Gui.Window.hWnd;
 
 	// Update matrix
 	const bool matrixReady = memoryManager.ReadMemory(gGame.GetMatrixAddress(), gGame.View.Matrix, 64);
@@ -136,8 +146,9 @@ void Cheats::Run()
 
 	Visual(LocalEntity);
 	Radar(GameRadar, LocalEntity);
-	MiscFuncs(LocalEntity);
-	AIM(LocalEntity, aimCandidates);
+	MiscFuncs(LocalEntity, allowGameInput);
+	if (allowGameInput)
+		AIM(LocalEntity, aimCandidates);
 
 	int currentFPS = static_cast<int>(ImGui::GetIO().Framerate);
 	if (currentFPS > MenuConfig::RenderFPS)
@@ -149,7 +160,8 @@ void Cheats::Run()
 	// Run trigger and spectator updates once per game tick.
 	if (m_currentTick != m_previousTick)
 	{
-		Trigger(LocalEntity, LocalPlayerControllerIndex);
+		if (allowGameInput)
+			Trigger(LocalEntity, LocalPlayerControllerIndex);
 		
 		std::vector<CEntity> allEntities;
 		for (const auto& pair : cachedResults) {
@@ -476,15 +488,18 @@ void AIM(const CEntity& LocalEntity, const std::vector<AimControl::AimCandidate>
 	RCS::RecoilControl(LocalEntity, fireDown, tracking);
 }
 
-void MiscFuncs(CEntity& LocalEntity)
+void MiscFuncs(CEntity& LocalEntity, const bool allowGameInput)
 {
     SpecList::SpectatorWindowList(LocalEntity);
     bmb::RenderWindow(LocalEntity.Controller.TeamID);
     SoundESP::Render();
-
     Misc::HitManager(LocalEntity, PreviousTotalHits);
-    Misc::BunnyHop(LocalEntity);
     Misc::Watermark(LocalEntity);
+
+    if (!allowGameInput)
+        return;
+
+    Misc::BunnyHop(LocalEntity);
     Misc::FastStop();
     Misc::AntiAFKKickUpdate();
     if (MiscCFG::AutoKnife && !MenuConfig::ShowMenu) {
@@ -560,7 +575,7 @@ std::string Cheats::GetCurrentMapName() {
 
     char currentMap[256] = { 0 };
     if (!memoryManager.ReadMemory(reinterpret_cast<DWORD64>(g_globalVars->g_cCurrentMapName),
-        currentMap, sizeof(currentMap) - 1)) {
+        currentMap, sizeof(currentMap) - 1, MemoryReadPolicy::AllowDataCache)) {
         return "";
     }
 

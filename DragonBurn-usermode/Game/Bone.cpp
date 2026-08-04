@@ -69,13 +69,13 @@ bool CBone::UpdateAllBoneDataBatch(const DWORD64& EntityPawnAddress) {
 	this->EntityPawnAddress = EntityPawnAddress;
 
 	// BATCH READ 1: Get dependent addresses
-	std::vector<std::pair<DWORD64, SIZE_T>> batch1Requests = {
+	std::vector<MemoryReadRequest> batch1Requests = {
 		{EntityPawnAddress + Offset.Pawn.GameSceneNode, sizeof(DWORD64)},  // GameSceneNodeAddr
 	};
 
 	std::vector<BYTE> batch1Buffer(sizeof(DWORD64));
 
-	if (!memoryManager.BatchReadMemory(batch1Requests, batch1Buffer.data())) {
+	if (!memoryManager.BatchReadMemory(batch1Requests, std::as_writable_bytes(std::span{ batch1Buffer }))) {
 		return false;
 	}
 
@@ -87,13 +87,13 @@ bool CBone::UpdateAllBoneDataBatch(const DWORD64& EntityPawnAddress) {
 	this->GameSceneNode = GameSceneNodeAddr;
 
 	// BATCH READ 2: Get BoneArray address
-	std::vector<std::pair<DWORD64, SIZE_T>> batch2Requests = {
+	std::vector<MemoryReadRequest> batch2Requests = {
 		{GameSceneNodeAddr + Offset.Pawn.BoneArray, sizeof(DWORD64)}  // BoneArrayAddress
 	};
 
 	std::vector<BYTE> batch2Buffer(sizeof(DWORD64));
 
-	if (!memoryManager.BatchReadMemory(batch2Requests, batch2Buffer.data())) {
+	if (!memoryManager.BatchReadMemory(batch2Requests, std::as_writable_bytes(std::span{ batch2Buffer }))) {
 		return false;
 	}
 
@@ -105,7 +105,7 @@ bool CBone::UpdateAllBoneDataBatch(const DWORD64& EntityPawnAddress) {
 
 	// BATCH READ 3: Read all bone data at once
 	constexpr size_t NUM_BONES = static_cast<size_t>(BONEINDEX::ankle_R) + 1;
-	std::vector<std::pair<DWORD64, SIZE_T>> batch3Requests;
+	std::vector<MemoryReadRequest> batch3Requests;
 	batch3Requests.reserve(NUM_BONES);
 
 	// Create requests for each bone (each bone is 32 bytes apart)
@@ -118,7 +118,7 @@ bool CBone::UpdateAllBoneDataBatch(const DWORD64& EntityPawnAddress) {
 	std::vector<BYTE> batch3Buffer(total_size);
 
 	// Perform batch read for all bones
-	if (!memoryManager.BatchReadMemory(batch3Requests, batch3Buffer.data())) {
+	if (!memoryManager.BatchReadMemory(batch3Requests, std::as_writable_bytes(std::span{ batch3Buffer }))) {
 		return false;
 	}
 

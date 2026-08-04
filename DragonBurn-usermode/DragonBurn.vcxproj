@@ -48,7 +48,7 @@
     <OutDir>$(SolutionDir)\built_dbg\</OutDir>
     <IntDir>$(SolutionDir)\built_dbg\cache\um</IntDir>
     <RunCodeAnalysis>false</RunCodeAnalysis>
-    <IncludePath>Libs\json;Libs\civetweb\include;$(IncludePath)</IncludePath>
+    <IncludePath>Libs\json;Libs\civetweb\include;..\memprocfs;$(IncludePath)</IncludePath>
     <ExternalIncludePath>$(ExternalIncludePath)</ExternalIncludePath>
     <TargetName>VoidSpectre</TargetName>
     <LibraryPath>$(LibraryPath)</LibraryPath>
@@ -57,7 +57,7 @@
     <OutDir>$(SolutionDir)\built\</OutDir>
     <IntDir>$(SolutionDir)\built\cache\um</IntDir>
     <RunCodeAnalysis>false</RunCodeAnalysis>
-    <IncludePath>Libs\json;Libs\civetweb\include;$(IncludePath)</IncludePath>
+    <IncludePath>Libs\json;Libs\civetweb\include;..\memprocfs;$(IncludePath)</IncludePath>
     <ExternalIncludePath>$(ExternalIncludePath)</ExternalIncludePath>
     <TargetName>VoidSpectre</TargetName>
     <LibraryPath>$(LibraryPath)</LibraryPath>
@@ -144,6 +144,9 @@
     <ClInclude Include="OS-ImGui\OS-ImGui_Struct.h" />
     <ClInclude Include="OS-ImGui\stb\stb_image.h" />
     <ClInclude Include="Core\MemoryMgr.h" />
+    <ClInclude Include="Core\MemoryBackend.h" />
+    <ClInclude Include="Core\DriverMemoryBackend.h" />
+    <ClInclude Include="Core\MemProcFsMemoryBackend.h" />
     <ClInclude Include="..\Shared\DragonBurnProtocol.h" />
     <ClInclude Include="Resources\resource.h" />
     <ClInclude Include="Resources\Font.h" />
@@ -192,6 +195,8 @@
     <ClCompile Include="OS-ImGui\OS-ImGui_Base.cpp" />
     <ClCompile Include="OS-ImGui\OS-ImGui_External.cpp" />
     <ClCompile Include="Core\MemoryMgr.cpp" />
+    <ClCompile Include="Core\DriverMemoryBackend.cpp" />
+    <ClCompile Include="Core\MemProcFsMemoryBackend.cpp" />
     <ClCompile Include="Helpers\StorageMgr.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -208,4 +213,21 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <Target Name="StageMemProcFsRuntime" AfterTargets="Build">
+    <ItemGroup>
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\vmm.dll" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\leechcore.dll" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\leechcore_driver.dll" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\FTD3XX.dll" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\FTD3XXWU.dll" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\vcruntime140.dll" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\info.db" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\LICENSE.txt" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\license_info_all.txt" />
+      <MemProcFsRuntime Include="$(ProjectDir)..\memprocfs\redist_vcruntime.txt" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(MemProcFsRuntime.Identity)')" Text="Missing required MemProcFS runtime file: %(MemProcFsRuntime.Identity)" />
+    <MakeDir Directories="$(OutDir)memprocfs" />
+    <Copy SourceFiles="@(MemProcFsRuntime)" DestinationFolder="$(OutDir)memprocfs" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
