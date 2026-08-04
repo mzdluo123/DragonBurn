@@ -110,24 +110,18 @@ void Cheats::Run()
 		|| (RadarCFG::ShowRadar && MenuConfig::ShowMenu)))
 		RadarSetting(GameRadar);
 
-	// process entities
+	// Web radar hydration is independent of the full ESP/aim pipeline. Publish the
+	// lightweight snapshot first so later feature failures cannot stall clients.
+	auto radarEntities = CollectEntityData(LocalEntity, LocalPlayerControllerIndex, true, false);
+	if (!localRadarPawnReady || radarEntities.empty())
+		WebRadar::Invalidate();
+	else
+		WebRadar::Publish(LocalEntity, radarEntities, m_currentTick, GetCurrentMapName());
+
+	// Full entity processing is only needed by foreground features.
 	std::vector<EntityResult> entityResults;
 	if (!backgroundRadarOnly && matrixReady && clientDataReady && (localPawnReady || MenuConfig::WorkInSpec))
 		entityResults = ProcessEntities(LocalEntity, LocalPlayerControllerIndex);
-	else
-		CollectEntityData(LocalEntity, LocalPlayerControllerIndex, backgroundRadarOnly);
-	if (!localRadarPawnReady)
-	{
-		WebRadar::Invalidate();
-	}
-	else if (cachedResults.empty())
-	{
-		WebRadar::Invalidate();
-	}
-	else
-	{
-		WebRadar::Publish(LocalEntity, cachedResults, m_currentTick, GetCurrentMapName());
-	}
 	if (backgroundRadarOnly || !matrixReady || !clientDataReady || (!localPawnReady && !MenuConfig::WorkInSpec))
 	{
 		if (backgroundRadarOnly)
@@ -167,7 +161,8 @@ void Cheats::Run()
 }
 
 // collect entity data
-	std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex, bool radarOnly)
+	std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex,
+		bool radarOnly, bool updateFeatureCache)
 {
 	// update only on new tick
 	//if (m_currentTick == m_previousTick)
@@ -207,7 +202,8 @@ void Cheats::Run()
 
 	if (batchData.empty())
 	{
-		cachedResults.clear();
+		if (updateFeatureCache)
+			cachedResults.clear();
 		WebRadar::Invalidate();
 		return {};
 	}
@@ -220,15 +216,16 @@ void Cheats::Run()
 		: processor.ProcessAllEntities(entities, batchData);
 	if (!processed)
 	{
-		cachedResults.clear();
+		if (updateFeatureCache)
+			cachedResults.clear();
 		WebRadar::Invalidate();
 		return {};
 	}
 
-	// update cache
-	cachedResults = entities;
+	if (updateFeatureCache)
+		cachedResults = entities;
 
-	return cachedResults;
+	return entities;
 }
 
 // process, prepare results
