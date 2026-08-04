@@ -52,6 +52,17 @@ BEGIN
 END
 
 #endif    // APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bundled web radar map cache
+//
+
+IDR_WEBRADAR_MAP_MANIFEST RCDATA "WebRadarMaps\\available.json"
+IDR_WEBRADAR_DUST2_ICON   RCDATA "WebRadarMaps\\assets\\de_dust2\\icon.png"
+IDR_WEBRADAR_DUST2_MAIN   RCDATA "WebRadarMaps\\assets\\de_dust2\\main.png"
+IDR_WEBRADAR_MIRAGE_ICON  RCDATA "WebRadarMaps\\assets\\de_mirage\\icon.png"
+IDR_WEBRADAR_MIRAGE_MAIN  RCDATA "WebRadarMaps\\assets\\de_mirage\\main.png"
+
 
 
 /////////////////////////////////////////////////////////////////////////////

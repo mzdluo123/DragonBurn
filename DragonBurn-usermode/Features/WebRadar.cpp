@@ -2,6 +2,7 @@
 #include "WebRadarMapProvider.h"
 
 #include "../Resources/WebRadarAssets.generated.h"
+#include "../Resources/resource.h"
 #include "../Libs/civetweb/include/civetweb.h"
 
 #include <json.hpp>
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <cstdlib>
 #include <memory>
@@ -444,6 +446,62 @@ namespace
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
+    struct BundledMapAsset
+    {
+        int resourceId;
+        std::filesystem::path relativePath;
+    };
+
+    void SeedBundledMapCache(const std::filesystem::path& cacheRoot)
+    {
+        const std::array assets{
+            BundledMapAsset{ IDR_WEBRADAR_MAP_MANIFEST, L"available.json" },
+            BundledMapAsset{ IDR_WEBRADAR_DUST2_ICON, L"assets/de_dust2/icon.png" },
+            BundledMapAsset{ IDR_WEBRADAR_DUST2_MAIN, L"assets/de_dust2/main.png" },
+            BundledMapAsset{ IDR_WEBRADAR_MIRAGE_ICON, L"assets/de_mirage/icon.png" },
+            BundledMapAsset{ IDR_WEBRADAR_MIRAGE_MAIN, L"assets/de_mirage/main.png" },
+        };
+        const HMODULE module = GetModuleHandleW(nullptr);
+        if (!module)
+            return;
+
+        for (const auto& asset : assets)
+        {
+            const auto destination = cacheRoot / asset.relativePath;
+            std::error_code error;
+            const auto existingSize = std::filesystem::file_size(destination, error);
+            if (!error && existingSize != 0)
+                continue;
+
+            const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(asset.resourceId), RT_RCDATA);
+            if (!resource)
+                continue;
+            const HGLOBAL loaded = LoadResource(module, resource);
+            const DWORD size = SizeofResource(module, resource);
+            const void* data = loaded ? LockResource(loaded) : nullptr;
+            if (!data || size == 0)
+                continue;
+
+            std::filesystem::create_directories(destination.parent_path(), error);
+            if (error)
+                continue;
+            auto temporary = destination;
+            temporary += L".tmp";
+            {
+                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+                output.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+                if (!output)
+                {
+                    output.close();
+                    std::filesystem::remove(temporary, error);
+                    continue;
+                }
+            }
+            if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                std::filesystem::remove(temporary, error);
+        }
+    }
+
 }
 
 bool WebRadar::Start(const WebRadarConfig& config)
@@ -457,6 +515,7 @@ bool WebRadar::Start(const WebRadarConfig& config)
     if ((features & MG_FEATURES_WEBSOCKET) == 0)
         return false;
 
+    SeedBundledMapCache(config.mapCacheRoot);
     serviceState.mapProvider = std::make_unique<WebRadarMaps::Provider>(config.mapCacheRoot);
     const std::string listeningPort = config.listenAddress + ":" + std::to_string(config.port);
     const char* options[] = {
