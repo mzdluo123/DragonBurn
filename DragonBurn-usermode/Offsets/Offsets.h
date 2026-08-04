@@ -52,6 +52,7 @@ public:
 		DWORD CurrentArmor;
 		DWORD MaxHealth;
 		DWORD CurrentHealth;
+		DWORD LifeState;
 		DWORD GameSceneNode;
 		DWORD BoneArray;
 		DWORD angEyeAngles;

@@ -92,6 +92,8 @@ bool CEntity::UpdatePawn(const DWORD64& PlayerPawnAddress)
 		return false;
 	if (!this->Pawn.GetHealth())//
 		return false;
+	if (!this->Pawn.GetLifeState())//
+		return false;
 	if (!this->Pawn.GetAmmo())//
 		return false;
 	//if (!this->Pawn.GetMaxAmmo())
@@ -130,6 +132,8 @@ bool CEntity::UpdateRadarPawn(const DWORD64& PlayerPawnAddress)
 		return false;
 	if (!this->Pawn.GetHealth())
 		return false;
+	if (!this->Pawn.GetLifeState())
+		return false;
 	if (!this->Pawn.GetWeaponName())
 		this->Pawn.WeaponName.clear();
 
@@ -156,7 +160,7 @@ bool PlayerController::GetHealth()
 
 bool PlayerController::GetIsAlive()
 {
-	return GetDataAddressWithOffset<int>(Address, Offset.Entity.IsAlive, this->AliveStatus);
+	return GetDataAddressWithOffset<bool>(Address, Offset.Entity.IsAlive, this->AliveStatus);
 }
 
 bool PlayerController::GetPlayerName()
@@ -305,6 +309,11 @@ bool PlayerPawn::GetHealth()
 	return GetDataAddressWithOffset<int>(Address, Offset.Pawn.CurrentHealth, this->Health);
 }
 
+bool PlayerPawn::GetLifeState()
+{
+	return GetDataAddressWithOffset<BYTE>(Address, Offset.Pawn.LifeState, this->LifeState);
+}
+
 bool PlayerPawn::GetArmor()
 {
 	return GetDataAddressWithOffset<int>(Address, Offset.Pawn.CurrentArmor, this->Armor);
@@ -400,7 +409,7 @@ std::vector<short> PlayerPawn::GetWeaponInventory(DWORD64 entityList) const
 
 bool CEntity::IsAlive() const
 {
-	return this->Controller.AliveStatus == 1 && this->Pawn.Health > 0;
+	return this->Controller.AliveStatus && this->Pawn.LifeState == 0;
 }
 
 bool CEntity::IsInScreen()
@@ -556,13 +565,13 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 	std::vector<DWORD64>& cameraAddresses) {
 
 	std::vector<std::pair<DWORD64, SIZE_T>> requests;
-	requests.reserve(entities.size() * 20); // 6 controller + 14 pawn fields per entity
+	requests.reserve(entities.size() * 21); // 6 controller + 15 pawn fields per entity
 
 	// Build all requests for Phase 1
 	for (const auto& [entityIndex, entity] : entities) {
 		// ALL controller requests for this entity
 		requests.emplace_back(entity.Controller.Address + Offset.Pawn.CurrentHealth, sizeof(int));
-		requests.emplace_back(entity.Controller.Address + Offset.Entity.IsAlive, sizeof(int));
+		requests.emplace_back(entity.Controller.Address + Offset.Entity.IsAlive, sizeof(bool));
 		requests.emplace_back(entity.Controller.Address + Offset.Pawn.iTeamNum, sizeof(int));
 		requests.emplace_back(entity.Controller.Address + Offset.Entity.iszPlayerName, MAX_PATH);
 		requests.emplace_back(entity.Controller.Address + Offset.PlayerController.m_steamID, sizeof(INT64));
@@ -578,6 +587,7 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.iShotsFired, sizeof(DWORD));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.iTeamNum, sizeof(int));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.CurrentHealth, sizeof(int));
+		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.LifeState, sizeof(BYTE));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.CurrentArmor, sizeof(int));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.flFlashDuration, sizeof(float));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.AbsVelocity, sizeof(Vec3));
@@ -613,8 +623,8 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		memcpy(&entity.Controller.Health, buffer.data() + currentOffset, sizeof(int));
 		currentOffset += sizeof(int);
 
-		memcpy(&entity.Controller.AliveStatus, buffer.data() + currentOffset, sizeof(int));
-		currentOffset += sizeof(int);
+		memcpy(&entity.Controller.AliveStatus, buffer.data() + currentOffset, sizeof(bool));
+		currentOffset += sizeof(bool);
 
 		memcpy(&entity.Controller.TeamID, buffer.data() + currentOffset, sizeof(int));
 		currentOffset += sizeof(int);
@@ -636,7 +646,7 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		memcpy(&entity.Controller.Pawn, buffer.data() + currentOffset, sizeof(DWORD));
 		currentOffset += sizeof(DWORD);
 
-		// Extract pawn core data (14 fields)
+		// Extract pawn core data (15 fields)
 		memcpy(&entity.Pawn.ViewAngle, buffer.data() + currentOffset, sizeof(Vec2));
 		currentOffset += sizeof(Vec2);
 
@@ -660,6 +670,9 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 
 		memcpy(&entity.Pawn.Health, buffer.data() + currentOffset, sizeof(int));
 		currentOffset += sizeof(int);
+
+		memcpy(&entity.Pawn.LifeState, buffer.data() + currentOffset, sizeof(BYTE));
+		currentOffset += sizeof(BYTE);
 
 		memcpy(&entity.Pawn.Armor, buffer.data() + currentOffset, sizeof(int));
 		currentOffset += sizeof(int);

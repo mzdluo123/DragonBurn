@@ -146,7 +146,7 @@ namespace
         result.slot = slot;
         CopyUtf8(result.name, entity.Controller.PlayerName);
         result.team = entity.Controller.TeamID;
-        result.alive = entity.Controller.AliveStatus == 1 && entity.Pawn.Health > 0;
+        result.alive = entity.IsAlive();
         result.health = std::clamp(entity.Pawn.Health, 0, 100);
         CopyUtf8(result.weapon, entity.Pawn.WeaponName);
         result.x = position.x;
@@ -198,7 +198,7 @@ void WebRadar::Publish(const CEntity& localEntity,
         if (snapshot.playerCount == snapshot.players.size())
             break;
         RadarPlayer player;
-        if (TryCopyPlayer(entity, slot, player))
+        if (TryCopyPlayer(entity, slot, player) && player.alive)
             snapshot.players[snapshot.playerCount++] = player;
     }
 

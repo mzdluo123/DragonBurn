@@ -52,6 +52,7 @@ void Offsets::SetOffsets(const std::string& offsetsData, const std::string& butt
         this->Pawn.CurrentArmor = get_class_field("C_CSPlayerPawn", "m_ArmorValue");
         this->Pawn.MaxHealth = get_class_field("C_BaseEntity", "m_iMaxHealth");
         this->Pawn.CurrentHealth = get_class_field("C_BaseEntity", "m_iHealth");
+        this->Pawn.LifeState = get_class_field("C_BaseEntity", "m_lifeState");
         this->Pawn.GameSceneNode = get_class_field("C_BaseEntity", "m_pGameSceneNode");
         this->Pawn.BoneArray = get_class_field("CSkeletonInstance", "m_modelState") + 0x80;
         this->Pawn.angEyeAngles = get_class_field("C_CSPlayerPawn", "m_angEyeAngles");

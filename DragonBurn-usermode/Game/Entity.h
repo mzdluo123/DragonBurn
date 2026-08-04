@@ -13,7 +13,7 @@ public:
 	int CashSpentTotal = 0;
 	int TeamID = 0;
 	int Health = 0;
-	int AliveStatus = 0;
+	bool AliveStatus = false;
 	INT64 SteamID = 0;
 	int m_nTickBase = 0;
 	DWORD Pawn = 0;
@@ -54,6 +54,7 @@ public:
 	DWORD GameSceneNode;
 	Vec2 AimPunchAngle{};
 	int Health;
+	BYTE LifeState = 0xFF;
 	int Ammo;
 	//int MaxAmmo;
 	int Armor;
@@ -73,6 +74,7 @@ public:
 	bool GetShotsFired();
 	bool GetAimPunchAngle();
 	bool GetHealth();
+	bool GetLifeState();
 	bool GetTeamID();
 	bool GetFov();
 	bool GetSpotted();

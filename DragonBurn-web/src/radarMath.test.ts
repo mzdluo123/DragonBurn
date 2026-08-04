@@ -81,10 +81,15 @@ describe("radar contracts", () => {
     expect(isSnapshotExpired(1000, 1499)).toBe(false);
     expect(isSnapshotExpired(1000, 1500)).toBe(true);
   });
-  it("keeps dead players in protocol but out of instance groups", () => {
-    const dead = player(7, { alive: false, health: 0, weapon: "awp" });
+  it("removes dead players even while health is delayed", () => {
+    const dead = player(7, { alive: false, health: 100, weapon: "awp" });
     const parsed = parseSnapshot({ ...snapshot, players: [dead] });
-    expect(parsed?.players[0]).toMatchObject({ alive: false, weapon: "awp" });
+    expect(parsed?.players[0]).toMatchObject({ alive: false, health: 100, weapon: "awp" });
     expect(groupVisiblePlayers(parsed!.players, map, "main").current).toHaveLength(0);
+  });
+  it("removes zero-health players even if the alive flag is stale", () => {
+    const groups = groupVisiblePlayers([player(8, { alive: true, health: 0 })], map, "main");
+    expect(groups.current).toHaveLength(0);
+    expect(groups.other).toHaveLength(0);
   });
 });

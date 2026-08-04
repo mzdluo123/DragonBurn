@@ -52,7 +52,7 @@ export interface PlayerGroups {
 export function groupVisiblePlayers(players: readonly RadarPlayer[], map: MapMetadata, selectedLayer: string): PlayerGroups {
   const result: PlayerGroups = { current: [], other: [] };
   for (const player of players) {
-    if (!player.alive || result.current.length + result.other.length >= MAX_RADAR_PLAYERS) continue;
+    if (!player.alive || player.health <= 0 || result.current.length + result.other.length >= MAX_RADAR_PLAYERS) continue;
     const target = layerForAltitude(player.z, map) === selectedLayer ? result.current : result.other;
     target.push(player);
   }

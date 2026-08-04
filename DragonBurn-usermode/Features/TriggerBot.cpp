@@ -8,7 +8,7 @@ void TriggerBot::Run(const CEntity& LocalEntity, const int& LocalPlayerControlle
     if (MenuConfig::ShowMenu)
         return;
 
-    if (LocalEntity.Controller.AliveStatus == 0)
+    if (!LocalEntity.Controller.AliveStatus)
         return;
 
     // Get the entity under the crosshair
