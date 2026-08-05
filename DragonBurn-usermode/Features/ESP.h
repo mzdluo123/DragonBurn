@@ -184,17 +184,7 @@ namespace ESP
 		}
 
 		// check and display C4 icon
-		if (ESPConfig::ShowWeaponESP) {
-			auto weaponInventory = Entity.Pawn.GetWeaponInventory(gGame.GetEntityListAddress());
-			bool hasC4 = false;
-			for (short weaponID : weaponInventory) {
-				if (weaponID == 49) { // 49 is the weapon ID for C4
-					hasC4 = true;
-					break;
-				}
-			}
-
-			if (hasC4 && Entity.Pawn.WeaponName != "c4") {
+		if (ESPConfig::ShowWeaponESP && Entity.Pawn.HasC4 && Entity.Pawn.WeaponName != "c4") {
 				WeaponIconSize iconSize = weaponIconSizes["c4"];
 				ImVec2 c4TextPosition = { Rect.x + (Rect.z - iconSize.width) / 2 + iconSize.offsetX,
 										  Rect.y + Rect.w + 1 + iconSize.offsetY + (ESPConfig::AmmoBar ? 6.f : 0.f) + (ESPConfig::ShowWeaponESP && Entity.Pawn.WeaponName != "Weapon_None" ? 13.f : 0.f) };
@@ -206,12 +196,9 @@ namespace ESP
 				}
 				ImGui::GetBackgroundDrawList()->AddText(ioFonts, 10.0f, c4TextPosition, ImColor(255, 255, 255, 255), GunIcon("c4"));
 			}
-		}
 
         if (ESPConfig::ShowIsScoped) {
-            bool isScoped;
-            memoryManager.ReadMemory<bool>(Entity.Pawn.Address + Offset.Pawn.isScoped, isScoped);
-            if (isScoped) {
+            if (Entity.Pawn.IsScoped) {
                 ImVec2 iconPos = { Rect.x, Rect.y };
                 const ImVec2 scopeOffsets[4] = { { -1, -1 }, { -1, 1 }, { 1, 1 }, { 1, -1 } };
                 for (const auto& off : scopeOffsets) {

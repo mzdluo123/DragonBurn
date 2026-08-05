@@ -14,70 +14,173 @@ namespace SpecList
 
     static SpecData g_spec_data;
 
-    uintptr_t GetObserverTarget(uintptr_t entityPawnAddress)
+    void GetSpectatorList(
+        const std::span<const std::pair<int, CEntity>> allEntities,
+        const CEntity& localEntity)
     {
-        if (!entityPawnAddress)
-            return 0;
-
-        uintptr_t observerServices = 0;
-        if (!memoryManager.ReadMemory<uintptr_t>(entityPawnAddress + Offset.PlayerController.m_pObserverServices, observerServices) || !observerServices)
-            return 0;
-
-        uint32_t observedTargetHandle = 0;
-        if (!memoryManager.ReadMemory<uint32_t>(observerServices + Offset.PlayerController.m_hObserverTarget, observedTargetHandle) || !observedTargetHandle)
-            return 0;
-
-        return CEntity::ResolveEntityHandle(observedTargetHandle);
-    }
-
-    void GetSpectatorList(const std::vector<CEntity>& allEntities, CEntity& LocalEntity)
-    {
-        auto prev_spectators = g_spec_data.current_spectators;
-
+        const auto previousSpectators = g_spec_data.current_spectators;
         g_spec_data.current_spectators.clear();
         g_spec_data.spectated_pawn = 0;
         g_spec_data.prev_target_pawn = 0;
 
-        if (!LocalEntity.IsAlive() && LocalEntity.Pawn.Address != 0)
+        std::vector<size_t> candidateIndices;
+        std::vector<MemoryReadRequest> pawnHandleRequests;
+        for (size_t index = 0; index < allEntities.size(); ++index)
         {
-            g_spec_data.prev_target_pawn = GetObserverTarget(LocalEntity.Pawn.Address);
-            g_spec_data.spectated_pawn = g_spec_data.prev_target_pawn;
+            const CEntity& entity = allEntities[index].second;
+            if (entity.Controller.Address == 0 || entity.Controller.PlayerName.empty() ||
+                entity.Controller.Address == localEntity.Controller.Address ||
+                (localEntity.IsAlive() && entity.IsAlive()))
+            {
+                continue;
+            }
+
+            candidateIndices.push_back(index);
+            pawnHandleRequests.emplace_back(
+                entity.Controller.Address + Offset.PlayerController.m_hPawn,
+                sizeof(DWORD));
         }
 
-        for (const auto& entity : allEntities)
+        std::vector<DWORD64> candidatePawns(candidateIndices.size(), 0);
+        if (!pawnHandleRequests.empty())
         {
-            if (!entity.Controller.Address || entity.Controller.PlayerName.empty())
-                continue;
+            std::vector<DWORD> pawnHandles(pawnHandleRequests.size(), 0);
+            std::vector<std::uint8_t> handleSucceeded(pawnHandleRequests.size(), 0);
+            const MemoryBatchReadResult handleResult = memoryManager.BatchReadMemoryBestEffort(
+                pawnHandleRequests,
+                std::as_writable_bytes(std::span{ pawnHandles }),
+                MemoryReadPolicy::BypassDataCache,
+                handleSucceeded);
+            if (handleResult.completed)
+            {
+                for (size_t index = 0; index < pawnHandles.size(); ++index)
+                {
+                    if (handleSucceeded[index] == 0)
+                        pawnHandles[index] = 0;
+                }
 
-            if (entity.Controller.Address == LocalEntity.Controller.Address)
-                continue;
-
-            if (LocalEntity.IsAlive() && entity.IsAlive())
-                continue;
-
-            uintptr_t pawn_handle = 0;
-            if (!memoryManager.ReadMemory<uintptr_t>(entity.Controller.Address + Offset.PlayerController.m_hPawn, pawn_handle))
-                continue;
-
-            uintptr_t pawn_addr = 0;
-            if (pawn_handle != 0)
-                pawn_addr = CEntity::ResolveEntityHandle(pawn_handle);
-
-            if (!pawn_addr)
-                pawn_addr = entity.Pawn.Address;
-
-            if (!pawn_addr)
-                continue;
-
-            uintptr_t spec_target = GetObserverTarget(pawn_addr);
-            if (!spec_target)
-                continue;
-
-            if (spec_target == LocalEntity.Pawn.Address || (g_spec_data.spectated_pawn != 0 && spec_target == g_spec_data.spectated_pawn))
-                g_spec_data.current_spectators.insert(entity.Controller.PlayerName);
+                std::vector<std::uint8_t> resolveSucceeded(pawnHandles.size(), 0);
+                const MemoryBatchReadResult resolveResult = gGame.ResolveEntityHandles(
+                    pawnHandles,
+                    candidatePawns,
+                    resolveSucceeded);
+                for (size_t index = 0; index < candidatePawns.size(); ++index)
+                {
+                    if (handleSucceeded[index] == 0)
+                        continue;
+                    if (!resolveResult.completed || resolveSucceeded[index] == 0)
+                        candidatePawns[index] = allEntities[candidateIndices[index]].second.Pawn.Address;
+                }
+            }
         }
 
-        g_spec_data.needs_refresh = (g_spec_data.current_spectators != prev_spectators);
+        struct ObserverSubject
+        {
+            DWORD64 pawnAddress;
+            size_t candidateIndex;
+            bool local;
+        };
+        std::vector<ObserverSubject> subjects;
+        subjects.reserve(candidatePawns.size() + 1);
+        for (size_t index = 0; index < candidatePawns.size(); ++index)
+        {
+            if (candidatePawns[index] != 0)
+                subjects.push_back({ candidatePawns[index], index, false });
+        }
+        if (!localEntity.IsAlive() && localEntity.Pawn.Address != 0)
+            subjects.push_back({ localEntity.Pawn.Address, 0, true });
+
+        if (!subjects.empty())
+        {
+            std::vector<MemoryReadRequest> serviceRequests;
+            serviceRequests.reserve(subjects.size());
+            for (const ObserverSubject& subject : subjects)
+            {
+                serviceRequests.emplace_back(
+                    subject.pawnAddress + Offset.PlayerController.m_pObserverServices,
+                    sizeof(DWORD64));
+            }
+
+            std::vector<DWORD64> observerServices(subjects.size(), 0);
+            std::vector<std::uint8_t> serviceSucceeded(subjects.size(), 0);
+            const MemoryBatchReadResult serviceResult = memoryManager.BatchReadMemoryBestEffort(
+                serviceRequests,
+                std::as_writable_bytes(std::span{ observerServices }),
+                MemoryReadPolicy::BypassDataCache,
+                serviceSucceeded);
+            if (serviceResult.completed)
+            {
+                std::vector<MemoryReadRequest> targetHandleRequests;
+                std::vector<size_t> targetSubjectIndices;
+                for (size_t index = 0; index < observerServices.size(); ++index)
+                {
+                    if (serviceSucceeded[index] == 0 || observerServices[index] == 0)
+                        continue;
+                    targetHandleRequests.emplace_back(
+                        observerServices[index] + Offset.PlayerController.m_hObserverTarget,
+                        sizeof(DWORD));
+                    targetSubjectIndices.push_back(index);
+                }
+
+                if (!targetHandleRequests.empty())
+                {
+                    std::vector<DWORD> targetHandles(targetHandleRequests.size(), 0);
+                    std::vector<std::uint8_t> targetHandleSucceeded(targetHandleRequests.size(), 0);
+                    const MemoryBatchReadResult targetHandleResult = memoryManager.BatchReadMemoryBestEffort(
+                        targetHandleRequests,
+                        std::as_writable_bytes(std::span{ targetHandles }),
+                        MemoryReadPolicy::BypassDataCache,
+                        targetHandleSucceeded);
+                    if (targetHandleResult.completed)
+                    {
+                        for (size_t index = 0; index < targetHandles.size(); ++index)
+                        {
+                            if (targetHandleSucceeded[index] == 0)
+                                targetHandles[index] = 0;
+                        }
+
+                        std::vector<DWORD64> targets(targetHandles.size(), 0);
+                        std::vector<std::uint8_t> targetSucceeded(targetHandles.size(), 0);
+                        const MemoryBatchReadResult targetResult = gGame.ResolveEntityHandles(
+                            targetHandles,
+                            targets,
+                            targetSucceeded);
+                        if (targetResult.completed)
+                        {
+                            for (size_t index = 0; index < targets.size(); ++index)
+                            {
+                                if (targetSucceeded[index] == 0)
+                                    continue;
+                                const ObserverSubject& subject = subjects[targetSubjectIndices[index]];
+                                if (subject.local)
+                                {
+                                    g_spec_data.prev_target_pawn = targets[index];
+                                    g_spec_data.spectated_pawn = targets[index];
+                                }
+                            }
+                            for (size_t index = 0; index < targets.size(); ++index)
+                            {
+                                if (targetSucceeded[index] == 0)
+                                    continue;
+                                const ObserverSubject& subject = subjects[targetSubjectIndices[index]];
+                                if (subject.local)
+                                    continue;
+                                if (targets[index] == localEntity.Pawn.Address ||
+                                    (g_spec_data.spectated_pawn != 0 &&
+                                        targets[index] == g_spec_data.spectated_pawn))
+                                {
+                                    g_spec_data.current_spectators.insert(
+                                        allEntities[candidateIndices[subject.candidateIndex]].second.Controller.PlayerName);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        g_spec_data.needs_refresh =
+            g_spec_data.current_spectators != previousSpectators;
     }
 
     void SpectatorWindowList(CEntity& LocalEntity)

@@ -188,16 +188,23 @@ bool DriverMemoryBackend::Read(
     return true;
 }
 
-bool DriverMemoryBackend::ReadBatch(
+MemoryBatchReadResult DriverMemoryBackend::ReadBatch(
     const std::span<const MemoryReadRequest> requests,
     const std::span<std::byte> output,
-    const MemoryReadPolicy)
+    const MemoryReadPolicy,
+    const std::span<std::uint8_t> requestSucceeded)
 {
+    if (output.data() != nullptr && !output.empty())
+        SecureZeroMemory(output.data(), output.size());
+    if (requestSucceeded.data() != nullptr && !requestSucceeded.empty())
+        SecureZeroMemory(requestSucceeded.data(), requestSucceeded.size());
+
     if (driver_ == nullptr || processId_ == 0 || requests.empty() || output.empty() ||
         output.data() == nullptr || requests.size() > MaxBatchMemoryRequests ||
-        output.size() > MaxBatchMemoryOutputSize)
+        output.size() > MaxBatchMemoryOutputSize ||
+        (!requestSucceeded.empty() && requestSucceeded.size() != requests.size()))
     {
-        return false;
+        return {};
     }
 
     const SIZE_T requestStructureSize = sizeof(Protocol::BatchReadHeader) +
@@ -206,13 +213,15 @@ bool DriverMemoryBackend::ReadBatch(
     if (totalBufferSize < requestStructureSize || totalBufferSize > batchScratch_.size() ||
         totalBufferSize > MAXDWORD)
     {
-        return false;
+        return {};
     }
 
+    SecureZeroMemory(batchScratch_.data(), totalBufferSize);
     auto* header = reinterpret_cast<Protocol::BatchReadHeader*>(batchScratch_.data());
     auto* batchRequests = reinterpret_cast<Protocol::BatchReadRequest*>(header + 1);
     header->process_id = ULongToHandle(processId_);
     header->num_requests = static_cast<UINT32>(requests.size());
+    header->successful_requests = 0;
     header->total_buffer_size = output.size();
 
     SIZE_T outputOffset = 0;
@@ -221,12 +230,14 @@ bool DriverMemoryBackend::ReadBatch(
         batchRequests[index].address = requests[index].address;
         batchRequests[index].size = requests[index].size;
         batchRequests[index].offset_in_buffer = outputOffset;
+        batchRequests[index].succeeded = 0;
         outputOffset += requests[index].size;
     }
 
     if (outputOffset != output.size())
-        return false;
+        return {};
 
+    DWORD bytesReturned = 0;
     const BOOL result = DeviceIoControl(
         driver_,
         Protocol::IoctlBatchRead,
@@ -234,11 +245,37 @@ bool DriverMemoryBackend::ReadBatch(
         static_cast<DWORD>(totalBufferSize),
         batchScratch_.data(),
         static_cast<DWORD>(totalBufferSize),
-        nullptr,
+        &bytesReturned,
         nullptr);
-    if (result != TRUE)
-        return false;
+    if (result != TRUE || bytesReturned != totalBufferSize)
+        return {};
+
+    if (header->process_id != ULongToHandle(processId_) ||
+        header->num_requests != requests.size() ||
+        header->total_buffer_size != output.size() ||
+        header->successful_requests > requests.size())
+    {
+        return {};
+    }
+
+    SIZE_T successfulRequests = 0;
+    for (size_t index = 0; index < requests.size(); ++index)
+    {
+        if (batchRequests[index].succeeded > 1)
+            return {};
+
+        successfulRequests += batchRequests[index].succeeded;
+    }
+
+    if (successfulRequests != header->successful_requests)
+        return {};
 
     std::memcpy(output.data(), batchScratch_.data() + requestStructureSize, output.size());
-    return true;
+    if (!requestSucceeded.empty())
+    {
+        for (size_t index = 0; index < requests.size(); ++index)
+            requestSucceeded[index] = static_cast<std::uint8_t>(batchRequests[index].succeeded);
+    }
+
+    return { true, successfulRequests };
 }

@@ -28,10 +28,11 @@ public:
         DWORD64 address,
         std::span<std::byte> output,
         MemoryReadPolicy policy) override;
-    bool ReadBatch(
+    MemoryBatchReadResult ReadBatch(
         std::span<const MemoryReadRequest> requests,
         std::span<std::byte> output,
-        MemoryReadPolicy policy) override;
+        MemoryReadPolicy policy,
+        std::span<std::uint8_t> requestSucceeded) override;
 
 private:
     HANDLE driver_ = nullptr;

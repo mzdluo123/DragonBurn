@@ -1,154 +1,53 @@
 #include "Bone.h"
 
-bool CBone::UpdateAllBoneData(const DWORD64& EntityPawnAddress) {
-    if (!EntityPawnAddress) return false;
-    this->EntityPawnAddress = EntityPawnAddress;
+#include <cstring>
 
-    uintptr_t gameSceneNodeAddr;
-    if (!memoryManager.ReadMemory(EntityPawnAddress + Offset.Pawn.GameSceneNode, gameSceneNodeAddr))
+bool CBone::LoadBoneBlock(
+    const DWORD64 entityPawnAddress,
+    const DWORD64 gameSceneNodeAddress,
+    const std::span<const std::byte> rawBoneBlock)
+{
+    constexpr size_t BoneCount = static_cast<size_t>(BONEINDEX::ankle_R) + 1;
+    constexpr size_t BoneBlockSize = BoneCount * sizeof(BoneMemoryRecord);
+    if (entityPawnAddress == 0 || gameSceneNodeAddress == 0 ||
+        rawBoneBlock.size() != BoneBlockSize)
+    {
+        BonePosList.clear();
+        IBoneData.clear();
+        EntityPawnAddress = 0;
+        GameSceneNode = 0;
         return false;
-
-    this->GameSceneNode = gameSceneNodeAddr;
-
-    uintptr_t boneArrayAddr;
-    if (!memoryManager.ReadMemory(gameSceneNodeAddr + Offset.Pawn.BoneArray, boneArrayAddr))
-        return false;
-
-    constexpr size_t NUM_BONES = static_cast<size_t>(BONEINDEX::ankle_R) + 1;
-
-    // Read bone data (position + rotation)
-    CBoneData IData[NUM_BONES];
-    if (!memoryManager.ReadMemory(boneArrayAddr, IData, NUM_BONES * sizeof(CBoneData)))
-        return false;
-
-    // Read original bone data (position only)
-    BoneJointData originalData[NUM_BONES];
-    if (!memoryManager.ReadMemory(boneArrayAddr, originalData, NUM_BONES * sizeof(BoneJointData)))
-        return false;
-
-    // Clear both lists
-    BonePosList.clear();
-    IBoneData.clear();
-    BonePosList.reserve(NUM_BONES);
-    IBoneData.reserve(NUM_BONES);
-
-    // Populate both data structures
-    for (size_t i = 0; i < NUM_BONES; ++i) {
-        // Get screen position
-        Vec2 screenPos;
-        bool visible = gGame.View.WorldToScreen(originalData[i].Pos, screenPos);
-
-        // Store original bone data (for compatibility)
-        BonePosList.push_back({ originalData[i].Pos, screenPos, visible });
-
-        // Store bone data
-        IBoneData.push_back({
-            originalData[i].Pos,  // Location
-            originalData[i].Scale,  // Scale
-            IData[i].Rotation  // Rotation
-            });
     }
 
+    std::vector<BoneJointPos> bonePositions;
+    std::vector<CBoneData> boneData;
+    bonePositions.reserve(BoneCount);
+    boneData.reserve(BoneCount);
+
+    for (size_t index = 0; index < BoneCount; ++index)
+    {
+        BoneMemoryRecord record{};
+        std::memcpy(
+            &record,
+            rawBoneBlock.data() + index * sizeof(BoneMemoryRecord),
+            sizeof(record));
+
+        const Vec3 position{ record.position[0], record.position[1], record.position[2] };
+        const Quaternion_t rotation{
+            record.rotation[0],
+            record.rotation[1],
+            record.rotation[2],
+            record.rotation[3]
+        };
+        Vec2 screenPosition{};
+        const bool visible = gGame.View.WorldToScreen(position, screenPosition);
+        bonePositions.push_back({ position, screenPosition, visible });
+        boneData.push_back({ position, record.scale, rotation });
+    }
+
+    EntityPawnAddress = entityPawnAddress;
+    GameSceneNode = gameSceneNodeAddress;
+    BonePosList = std::move(bonePositions);
+    IBoneData = std::move(boneData);
     return true;
-}
-
-/*
-std::optional<CBoneData> CBone::GetBoneData(int index) const {
-    if (index < 0 || index >= IBoneData.size()) {
-        // Log::Debug("[DEBUG] FAIL GetBoneData: Index out of bounds");
-        return std::nullopt;
-    }
-    return IBoneData[index];
-}
-*/
-
-bool CBone::UpdateAllBoneDataBatch(const DWORD64& EntityPawnAddress) {
-	if (EntityPawnAddress == 0)
-		return false;
-
-	this->EntityPawnAddress = EntityPawnAddress;
-
-	// BATCH READ 1: Get dependent addresses
-	std::vector<MemoryReadRequest> batch1Requests = {
-		{EntityPawnAddress + Offset.Pawn.GameSceneNode, sizeof(DWORD64)},  // GameSceneNodeAddr
-	};
-
-	std::vector<BYTE> batch1Buffer(sizeof(DWORD64));
-
-	if (!memoryManager.BatchReadMemory(batch1Requests, std::as_writable_bytes(std::span{ batch1Buffer }))) {
-		return false;
-	}
-
-	// Extract GameSceneNode address
-	DWORD64 GameSceneNodeAddr;
-	memcpy(&GameSceneNodeAddr, batch1Buffer.data(), sizeof(DWORD64));
-
-	if (GameSceneNodeAddr == 0) return false;
-	this->GameSceneNode = GameSceneNodeAddr;
-
-	// BATCH READ 2: Get BoneArray address
-	std::vector<MemoryReadRequest> batch2Requests = {
-		{GameSceneNodeAddr + Offset.Pawn.BoneArray, sizeof(DWORD64)}  // BoneArrayAddress
-	};
-
-	std::vector<BYTE> batch2Buffer(sizeof(DWORD64));
-
-	if (!memoryManager.BatchReadMemory(batch2Requests, std::as_writable_bytes(std::span{ batch2Buffer }))) {
-		return false;
-	}
-
-	// Extract BoneArray address
-	DWORD64 BoneArrayAddress;
-	memcpy(&BoneArrayAddress, batch2Buffer.data(), sizeof(DWORD64));
-
-	if (BoneArrayAddress == 0) return false;
-
-	// BATCH READ 3: Read all bone data at once
-	constexpr size_t NUM_BONES = static_cast<size_t>(BONEINDEX::ankle_R) + 1;
-	std::vector<MemoryReadRequest> batch3Requests;
-	batch3Requests.reserve(NUM_BONES);
-
-	// Create requests for each bone (each bone is 32 bytes apart)
-	for (size_t i = 0; i < NUM_BONES; ++i) {
-		batch3Requests.push_back({ BoneArrayAddress + (i * 32), sizeof(BoneJointData) });
-	}
-
-	// Calculate total buffer size
-	SIZE_T total_size = NUM_BONES * sizeof(BoneJointData);
-	std::vector<BYTE> batch3Buffer(total_size);
-
-	// Perform batch read for all bones
-	if (!memoryManager.BatchReadMemory(batch3Requests, std::as_writable_bytes(std::span{ batch3Buffer }))) {
-		return false;
-	}
-
-	// Clear both lists
-	BonePosList.clear();
-	IBoneData.clear();
-	BonePosList.reserve(NUM_BONES);
-	IBoneData.reserve(NUM_BONES);
-
-	// Extract bone data from buffer
-	SIZE_T offset = 0;
-	for (size_t i = 0; i < NUM_BONES; ++i) {
-		BoneJointData bone;
-		memcpy(&bone, batch3Buffer.data() + offset, sizeof(BoneJointData));
-		offset += sizeof(BoneJointData);
-
-		Vec2 ScreenPos;
-		bool IsVisible = false;
-		if (gGame.View.WorldToScreen(bone.Pos, ScreenPos))
-			IsVisible = true;
-
-		// Original bone position data
-		this->BonePosList.push_back({ bone.Pos, ScreenPos, IsVisible });
-
-		// bone data
-		CBoneData IBone;
-		IBone.Location = bone.Pos;
-		IBone.Scale = bone.Scale;
-		this->IBoneData.push_back(IBone);
-	}
-
-	return !BonePosList.empty();
 }

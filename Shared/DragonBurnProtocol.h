@@ -16,7 +16,7 @@ namespace Protocol
     constexpr ULONG IoctlRead = CTL_CODE(DeviceType, 0x4453, METHOD_BUFFERED, FILE_SPECIAL_ACCESS);
     constexpr ULONG IoctlGetModuleBase = CTL_CODE(DeviceType, 0x4454, METHOD_BUFFERED, FILE_SPECIAL_ACCESS);
     constexpr ULONG IoctlGetPid = CTL_CODE(DeviceType, 0x4455, METHOD_BUFFERED, FILE_SPECIAL_ACCESS);
-    constexpr ULONG IoctlBatchRead = CTL_CODE(DeviceType, 0x4456, METHOD_BUFFERED, FILE_SPECIAL_ACCESS);
+    constexpr ULONG IoctlBatchRead = CTL_CODE(DeviceType, 0x4457, METHOD_BUFFERED, FILE_SPECIAL_ACCESS);
 
     constexpr SIZE_T HostNameCapacity = 256;
     constexpr SIZE_T DevicePathCapacity = 64;
@@ -150,19 +150,24 @@ namespace Protocol
         UINT64 address;
         SIZE_T size;
         SIZE_T offset_in_buffer;
+        UINT32 succeeded;
     };
 
     struct BatchReadHeader
     {
         HANDLE process_id;
         UINT32 num_requests;
+        UINT32 successful_requests;
         SIZE_T total_buffer_size;
     };
 
     static_assert(sizeof(Request) == 32, "Request ABI changed");
     static_assert(sizeof(ProcessIdPacket) == 2052, "ProcessIdPacket ABI changed");
     static_assert(sizeof(ModulePacket) == 2072, "ModulePacket ABI changed");
-    static_assert(sizeof(BatchReadRequest) == 24, "BatchReadRequest ABI changed");
+    static_assert(FIELD_OFFSET(BatchReadRequest, succeeded) == 24, "BatchReadRequest success offset changed");
+    static_assert(sizeof(BatchReadRequest) == 32, "BatchReadRequest ABI changed");
+    static_assert(FIELD_OFFSET(BatchReadHeader, successful_requests) == 12, "BatchReadHeader success offset changed");
+    static_assert(FIELD_OFFSET(BatchReadHeader, total_buffer_size) == 16, "BatchReadHeader size offset changed");
     static_assert(sizeof(BatchReadHeader) == 24, "BatchReadHeader ABI changed");
 }
 }

@@ -32,12 +32,12 @@ public:
         std::span<std::byte> output,
         MemoryReadPolicy policy = MemoryReadPolicy::BypassDataCache);
 
-    // Reads valid ranges even when another request in the batch is stale.
-    // Failed ranges are zeroed; returns true when at least one range succeeds.
-    bool BatchReadMemoryBestEffort(
+    // Reads every valid range once and reports per-request success when requested.
+    MemoryBatchReadResult BatchReadMemoryBestEffort(
         std::span<const MemoryReadRequest> requests,
         std::span<std::byte> output,
-        MemoryReadPolicy policy = MemoryReadPolicy::BypassDataCache);
+        MemoryReadPolicy policy = MemoryReadPolicy::BypassDataCache,
+        std::span<std::uint8_t> requestSucceeded = {});
 
     template <typename ReadType>
     bool ReadMemory(
@@ -59,8 +59,7 @@ private:
         MemoryReadPolicy policy);
     bool ValidateBatch(
         std::span<const MemoryReadRequest> requests,
-        std::span<std::byte> output,
-        std::span<SIZE_T> offsets) const noexcept;
+        std::span<std::byte> output) const noexcept;
 
     std::unique_ptr<IMemoryBackend> backend_;
     DWORD processId_ = 0;

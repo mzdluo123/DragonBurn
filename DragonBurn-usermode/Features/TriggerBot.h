@@ -34,7 +34,6 @@ namespace TriggerBot
 	void ExecuteShot();
 
     // Utility functions
-	std::string GetWeapon(const CEntity& LocalEntity);
 	bool CheckWeapon(const std::string& WeaponName);
 	bool CheckScopeWeapon(const std::string& WeaponName);
 }

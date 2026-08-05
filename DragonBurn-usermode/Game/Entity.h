@@ -14,14 +14,13 @@ public:
 	int TeamID = 0;
 	int Health = 0;
 	bool AliveStatus = false;
+	bool HasHelmet = false;
 	INT64 SteamID = 0;
 	int m_nTickBase = 0;
 	DWORD Pawn = 0;
 	std::string PlayerName;
 	std::vector<std::string> spectators = {};
 
-	DWORD64 cachedEntityListEntry = 0;
-	DWORD lastCachedPawn = 0;
 
 public:
 	bool GetTeamID();
@@ -29,7 +28,6 @@ public:
 	bool GetIsAlive();
 	bool GetPlayerName();
 	bool GetPlayerSteamID();
-	DWORD64 GetPlayerPawnAddress();
 };
 
 class PlayerPawn
@@ -55,6 +53,10 @@ public:
 	Vec2 AimPunchAngle{};
 	int Health;
 	BYTE LifeState = 0xFF;
+	bool IsScoped = false;
+	float EmitSoundTime = 0.0f;
+	bool EmitSoundTimeValid = false;
+	bool HasC4 = false;
 	int Ammo;
 	//int MaxAmmo;
 	int Armor;
@@ -71,6 +73,7 @@ public:
 	bool GetCameraPos();
 	DWORD64 GetActiveWeaponAddress() const;
 	bool GetWeaponName();
+	bool GetIsScoped();
 	bool GetShotsFired();
 	bool GetAimPunchAngle();
 	bool GetHealth();
@@ -86,7 +89,6 @@ public:
 	bool GetFlashDuration();
 	bool GetVelocity();
 
-	std::vector<short> GetWeaponInventory(DWORD64 entityList) const;
 
 	bool HasFlag(const Flags Flag) const noexcept
 	{
@@ -119,7 +121,6 @@ public:
 	bool IsInScreen();
 	CBone GetBone() const;
 
-	static DWORD64 ResolveEntityHandle(uint32_t handle);
 
 	static std::unordered_map<int, std::string> weaponNames;
 	static inline std::string GetWeaponName(int weaponID) {
@@ -142,38 +143,36 @@ struct EntityBatchData {
 	}
 };
 
+enum class EntityBatchStatus
+{
+	Failed,
+	Empty,
+	Partial,
+	Ready
+};
+
 class EntityBatchProcessor {
 private:
-	std::vector<EntityBatchData> entityBatchData;
-	std::vector<BYTE> masterBuffer;
+	bool ProcessCoreEntityData(std::vector<std::pair<int, CEntity>>& entities);
+	bool ProcessRadarWeaponNames(std::vector<std::pair<int, CEntity>>& entities);
+	bool ProcessServiceData(std::vector<std::pair<int, CEntity>>& entities);
+	bool ProcessWeaponData(std::vector<std::pair<int, CEntity>>& entities);
+	bool ProcessDependenciesData(std::vector<std::pair<int, CEntity>>& entities);
+	void ProcessInventoryData(std::vector<std::pair<int, CEntity>>& entities);
+	bool ProcessBoneData(std::vector<std::pair<int, CEntity>>& entities);
 
-	// Phase 1: Controller + core pawn data
-	bool ProcessCoreEntityData(std::vector<std::pair<int, CEntity>>& entities,
-		std::vector<DWORD64>& weaponServiceAddresses,
-		std::vector<DWORD64>& aimPunchServiceAddresses,
-		std::vector<DWORD64>& cameraAddresses);
-	bool ProcessRadarWeaponNames(std::vector<std::pair<int, CEntity>>& entities,
-		const std::vector<DWORD64>& weaponAddresses);
-
-	// Phase 2: Pointer-dependent pawn data
-	bool ProcessServiceData(std::vector<std::pair<int, CEntity>>& entities,
-		const std::vector<DWORD64>& weaponServiceAddresses,
-		const std::vector<DWORD64>& aimPunchServiceAddresses,
-		std::vector<DWORD64>& weaponAddresses);
-
-	// Phase 3: Weapon data
-	bool ProcessWeaponData(std::vector<std::pair<int, CEntity>>& entities,
-		const std::vector<DWORD64>& weaponAddresses,
-		std::vector<DWORD64>& weaponDataAddresses);
-
-	// Phase 4: Final dependent data
-	bool ProcessDependenciesData(std::vector<std::pair<int, CEntity>>& entities,
-		const std::vector<DWORD64>& weaponDataAddresses,
-		const std::vector<DWORD64>& cameraAddresses);
+	std::vector<DWORD64> weaponServiceAddresses_;
+	std::vector<DWORD64> aimPunchServiceAddresses_;
+	std::vector<DWORD64> cameraAddresses_;
+	std::vector<DWORD64> weaponAddresses_;
+	bool radarInitialized_ = false;
+	size_t radarInputCount_ = 0;
 
 public:
-
-	bool ProcessRadarEntities(std::vector<std::pair<int, CEntity>>& entities,
-		const std::vector<EntityBatchData>& batchData);
-	bool ProcessAllEntities(std::vector<std::pair<int, CEntity>>& entities, const std::vector<EntityBatchData>& batchData);
+	EntityBatchStatus ProcessRadarEntities(
+		std::vector<std::pair<int, CEntity>>& entities,
+		std::span<const EntityBatchData> batchData);
+	EntityBatchStatus ProcessForegroundEntities(
+		std::vector<std::pair<int, CEntity>>& entities,
+		bool includeInventory);
 };

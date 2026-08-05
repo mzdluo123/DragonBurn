@@ -1,6 +1,8 @@
 #include "Entity.h"
-#undef min()
-#undef max()
+#include <algorithm>
+#include <cstring>
+#undef min
+#undef max
 
 
 std::unordered_map<int, std::string> CEntity::weaponNames = {
@@ -67,7 +69,6 @@ bool CEntity::UpdateController(const DWORD64& PlayerControllerAddress)
 	if (!this->Controller.GetPlayerSteamID())
 		return false;
 
-	this->Pawn.Address = this->Controller.GetPlayerPawnAddress();
 
 	return true;
 }
@@ -77,6 +78,8 @@ bool CEntity::UpdatePawn(const DWORD64& PlayerPawnAddress)
 	if (PlayerPawnAddress == 0)
 		return false;
 	this->Pawn.Address = PlayerPawnAddress;
+	this->Pawn.IsScoped = false;
+	this->Pawn.GetIsScoped();
 
 	if (!this->Pawn.GetCameraPos())//
 		return false;
@@ -113,8 +116,6 @@ bool CEntity::UpdatePawn(const DWORD64& PlayerPawnAddress)
 	if (!this->Pawn.GetFlashDuration())//
 		return false;
 	if (!this->Pawn.GetVelocity())
-		return false;
-	if (!this->Pawn.BoneData.UpdateAllBoneData(PlayerPawnAddress))//
 		return false;
 
 	return true;
@@ -217,7 +218,7 @@ DWORD64 PlayerPawn::GetActiveWeaponAddress() const
 		activeWeaponHandle == 0 || activeWeaponHandle == 0xFFFFFFFF)
 		return 0;
 
-	return CEntity::ResolveEntityHandle(activeWeaponHandle);
+	return gGame.ResolveEntityHandle(activeWeaponHandle);
 }
 
 bool PlayerPawn::GetWeaponName()
@@ -243,6 +244,11 @@ bool PlayerPawn::GetWeaponName()
 	return true;
 }
 
+bool PlayerPawn::GetIsScoped()
+{
+	return GetDataAddressWithOffset<bool>(Address, Offset.Pawn.isScoped, this->IsScoped);
+}
+
 bool PlayerPawn::GetShotsFired()
 {
 	return GetDataAddressWithOffset<DWORD>(Address, Offset.Pawn.iShotsFired, this->ShotsFired);
@@ -263,41 +269,6 @@ bool PlayerPawn::GetTeamID()
 }
 
 
-DWORD64 PlayerController::GetPlayerPawnAddress()
-{
-	// Get current Pawn ID
-	if (!GetDataAddressWithOffset<DWORD>(Address, Offset.Entity.PlayerPawn, this->Pawn))
-		return 0;
-
-	// Pre-calculate indices
-	const DWORD64 highIndex = (Pawn & 0x7FFF) >> 9;
-	const DWORD64 lowIndex = Pawn & 0x1FF;
-
-	// Cache the entity list entry if it's the same high-level index
-	DWORD64 EntityPawnListEntry = 0;
-
-	if (cachedEntityListEntry == 0 || (lastCachedPawn & 0x7FFF) >> 9 != highIndex) {
-		// Need to refresh cache
-		if (!memoryManager.ReadMemory<DWORD64>(gGame.GetEntityListAddress(), EntityPawnListEntry))
-			return 0;
-
-		if (EntityPawnListEntry == 0) return 0;
-
-		if (!memoryManager.ReadMemory<DWORD64>(EntityPawnListEntry + 0x10 + 8 * highIndex, cachedEntityListEntry))
-			return 0;
-
-		lastCachedPawn = Pawn;
-	}
-
-	if (cachedEntityListEntry == 0) return 0;
-
-	// Final read using cached value
-	DWORD64 EntityPawnAddress = 0;
-	if (!memoryManager.ReadMemory<DWORD64>(cachedEntityListEntry + 0x70 * lowIndex, EntityPawnAddress))
-		return 0;
-
-	return EntityPawnAddress;
-}
 
 bool PlayerPawn::GetPos()
 {
@@ -355,57 +326,6 @@ bool PlayerPawn::GetVelocity()
 	return true;
 }
 
-std::vector<short> PlayerPawn::GetWeaponInventory(DWORD64 entityList) const
-{
-	std::vector<short> weapons;
-
-	DWORD64 weaponServices = 0;
-	if (!memoryManager.ReadMemory<DWORD64>(Address + Offset.Pawn.m_pWeaponServices, weaponServices))
-		return weapons;
-	if (weaponServices == 0)
-		return weapons;
-
-	int weaponsCount = 0;
-	if (!memoryManager.ReadMemory<int>(weaponServices + Offset.WeaponBaseData.hMyWeapons, weaponsCount))
-		return weapons;
-	if (weaponsCount <= 0 || weaponsCount > 64)
-		return weapons;
-
-	DWORD64 weaponsData = 0;
-	if (!memoryManager.ReadMemory<DWORD64>(weaponServices + Offset.WeaponBaseData.hMyWeapons + 0x8, weaponsData))
-		return weapons;
-	if (weaponsData == 0)
-		return weapons;
-
-	for (int i = 0; i < weaponsCount; i++)
-	{
-		DWORD64 weaponHandleOffset = weaponsData + (i * 0x4);
-
-		DWORD weaponHandle = 0;
-		if (!memoryManager.ReadMemory<DWORD>(weaponHandleOffset, weaponHandle))
-			continue;
-		if (weaponHandle == 0 || weaponHandle == 0xFFFFFFFF)
-			continue;
-
-		int entityIndex = weaponHandle & 0x7FFF;
-		if (entityIndex >= 0x4000)
-			continue;
-
-		DWORD64 weaponPtr = CEntity::ResolveEntityHandle(weaponHandle);
-		if (weaponPtr == 0)
-			continue;
-
-		short weaponID = 0;
-		if (!memoryManager.ReadMemory<short>(weaponPtr + Offset.EconEntity.AttributeManager +
-			Offset.WeaponBaseData.Item +
-			Offset.WeaponBaseData.ItemDefinitionIndex, weaponID))
-			continue;
-		if (weaponID > 0 && weaponID < 100)
-			weapons.push_back(weaponID);
-	}
-
-	return weapons;
-}
 
 bool CEntity::IsAlive() const
 {
@@ -428,43 +348,6 @@ CBone CEntity::GetBone() const
 	return this->Pawn.BoneData;
 }
 
-DWORD64 CEntity::ResolveEntityHandle(uint32_t handle)
-{
-	static DWORD64 cachedEntityListEntry = 0;
-	static DWORD lastCachedPawn = 0;
-
-	if (handle == 0)
-		return 0;
-
-	// Pre-calculate indices
-	const DWORD64 highIndex = (handle & 0x7FFF) >> 9;
-	const DWORD64 lowIndex = handle & 0x1FF;
-
-	// Cache the entity list entry if it's the same high-level index
-	DWORD64 EntityListEntry = 0;
-
-	if (cachedEntityListEntry == 0 || (lastCachedPawn & 0x7FFF) >> 9 != highIndex) {
-		// Need to refresh cache
-		if (!memoryManager.ReadMemory<DWORD64>(gGame.GetEntityListAddress(), EntityListEntry))
-			return 0;
-
-		if (EntityListEntry == 0) return 0;
-
-		if (!memoryManager.ReadMemory<DWORD64>(EntityListEntry + 0x10 + 8 * highIndex, cachedEntityListEntry))
-			return 0;
-
-		lastCachedPawn = handle;
-	}
-
-	if (cachedEntityListEntry == 0) return 0;
-
-	// Final read using cached value
-	DWORD64 EntityAddress = 0;
-	if (!memoryManager.ReadMemory<DWORD64>(cachedEntityListEntry + 0x70 * lowIndex, EntityAddress))
-		return 0;
-
-	return EntityAddress;
-}
 
 bool Client::GetSensitivity()
 {
@@ -483,106 +366,102 @@ bool Client::GetSensitivity()
 	return true;
 }
 
-bool EntityBatchProcessor::ProcessRadarEntities(
-	std::vector<std::pair<int, CEntity>>& entities,
-	const std::vector<EntityBatchData>& batchData) {
-
-	if (batchData.empty()) return false;
-
-	entities.clear();
-	entities.reserve(batchData.size());
-
-	for (const auto& data : batchData) {
-		CEntity entity;
-		entity.Controller.Address = data.controllerAddress;
-		entity.Pawn.Address = data.pawnAddress;
-		entities.emplace_back(data.entityIndex, std::move(entity));
+namespace
+{
+	EntityBatchStatus ReduceBatchStatus(const size_t survivors, const size_t requested)
+	{
+		if (survivors == 0)
+			return EntityBatchStatus::Empty;
+		return survivors < requested ? EntityBatchStatus::Partial : EntityBatchStatus::Ready;
 	}
-	std::vector<DWORD64> weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses;
-	if (!ProcessCoreEntityData(entities, weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses)) {
-		entities.clear();
-		return false;
-	}
-
-	// Radar only needs the active weapon handle from the service phase.
-	std::fill(aimPunchServiceAddresses.begin(), aimPunchServiceAddresses.end(), 0);
-	std::vector<DWORD64> weaponAddresses;
-	if (ProcessServiceData(entities, weaponServiceAddresses, aimPunchServiceAddresses, weaponAddresses))
-		ProcessRadarWeaponNames(entities, weaponAddresses);
-
-	return true;
 }
 
-bool EntityBatchProcessor::ProcessAllEntities(
+EntityBatchStatus EntityBatchProcessor::ProcessRadarEntities(
 	std::vector<std::pair<int, CEntity>>& entities,
-	const std::vector<EntityBatchData>& batchData) {
-
-	if (batchData.empty()) return false;
-
+	const std::span<const EntityBatchData> batchData)
+{
+	radarInitialized_ = false;
+	radarInputCount_ = batchData.size();
 	entities.clear();
-	entities.reserve(batchData.size());
+	weaponServiceAddresses_.clear();
+	aimPunchServiceAddresses_.clear();
+	cameraAddresses_.clear();
+	weaponAddresses_.clear();
 
-	// Initialize entities
-	for (const auto& data : batchData) {
+	entities.reserve(batchData.size());
+	for (const EntityBatchData& data : batchData)
+	{
 		CEntity entity;
 		entity.Controller.Address = data.controllerAddress;
 		entity.Pawn.Address = data.pawnAddress;
 		entities.emplace_back(data.entityIndex, std::move(entity));
 	}
 
-	std::vector<DWORD64> weaponServiceAddresses, aimPunchServiceAddresses;
-	std::vector<DWORD64> weaponAddresses, cameraAddresses, weaponDataAddresses;
-
-	// Phase 1: Controller + Core Pawn Data
-	if (!ProcessCoreEntityData(entities, weaponServiceAddresses, aimPunchServiceAddresses, cameraAddresses)) {
-		return false;
+	if (batchData.empty())
+	{
+		radarInitialized_ = true;
+		return EntityBatchStatus::Empty;
 	}
 
-	// Phase 2: Pointer-dependent Pawn Data
-	if (!ProcessServiceData(entities, weaponServiceAddresses, aimPunchServiceAddresses, weaponAddresses)) {
-		return false;
+	if (!ProcessCoreEntityData(entities) ||
+		!ProcessServiceData(entities) ||
+		!ProcessRadarWeaponNames(entities))
+	{
+		entities.clear();
+		weaponServiceAddresses_.clear();
+		aimPunchServiceAddresses_.clear();
+		cameraAddresses_.clear();
+		weaponAddresses_.clear();
+		return EntityBatchStatus::Failed;
 	}
 
-	// Phase 3: Weapon Data
-	if (!ProcessWeaponData(entities, weaponAddresses, weaponDataAddresses)) {
-		return false;
+	radarInitialized_ = true;
+	return ReduceBatchStatus(entities.size(), radarInputCount_);
+}
+
+EntityBatchStatus EntityBatchProcessor::ProcessForegroundEntities(
+	std::vector<std::pair<int, CEntity>>& entities,
+	const bool includeInventory)
+{
+	if (!radarInitialized_ ||
+		entities.size() != weaponServiceAddresses_.size() ||
+		entities.size() != aimPunchServiceAddresses_.size() ||
+		entities.size() != cameraAddresses_.size() ||
+		entities.size() != weaponAddresses_.size())
+	{
+		return EntityBatchStatus::Failed;
 	}
 
-	// Phase 4: Final Dependent Data
-	if (!ProcessDependenciesData(entities, weaponDataAddresses, cameraAddresses)) {
-		return false;
-	}
-	// Phase 5: Bone Data. A stale pawn must not leave an empty bone vector
-	// for render and target-selection code to index.
-	std::erase_if(entities, [](auto& indexedEntity) {
-		auto& pawn = indexedEntity.second.Pawn;
-		return pawn.Address == 0 || !pawn.BoneData.UpdateAllBoneData(pawn.Address);
-	});
+	if (entities.empty())
+		return EntityBatchStatus::Empty;
 
-	return true;
+	if (!ProcessWeaponData(entities) || !ProcessDependenciesData(entities))
+		return EntityBatchStatus::Failed;
+
+	if (includeInventory)
+		ProcessInventoryData(entities);
+
+	if (!ProcessBoneData(entities))
+		return EntityBatchStatus::Failed;
+
+	return ReduceBatchStatus(entities.size(), radarInputCount_);
 }
 
 bool EntityBatchProcessor::ProcessCoreEntityData(
-	std::vector<std::pair<int, CEntity>>& entities,
-	std::vector<DWORD64>& weaponServiceAddresses,
-	std::vector<DWORD64>& aimPunchServiceAddresses,
-	std::vector<DWORD64>& cameraAddresses) {
-
+	std::vector<std::pair<int, CEntity>>& entities)
+{
+	constexpr size_t RequestsPerEntity = 23;
 	std::vector<MemoryReadRequest> requests;
-	requests.reserve(entities.size() * 21); // 6 controller + 15 pawn fields per entity
-
-	// Build all requests for Phase 1
-	for (const auto& [entityIndex, entity] : entities) {
-		// ALL controller requests for this entity
+	requests.reserve(entities.size() * RequestsPerEntity);
+	for (const auto& [entityIndex, entity] : entities)
+	{
 		requests.emplace_back(entity.Controller.Address + Offset.Pawn.CurrentHealth, sizeof(int));
 		requests.emplace_back(entity.Controller.Address + Offset.Entity.IsAlive, sizeof(bool));
 		requests.emplace_back(entity.Controller.Address + Offset.Pawn.iTeamNum, sizeof(int));
 		requests.emplace_back(entity.Controller.Address + Offset.Entity.iszPlayerName, MAX_PATH);
 		requests.emplace_back(entity.Controller.Address + Offset.PlayerController.m_steamID, sizeof(INT64));
-		//requests.emplace_back(entity.Controller.Address + Offset.PlayerController.m_nTickBase, sizeof(DWORD64));
-		requests.emplace_back(entity.Controller.Address + Offset.Entity.PlayerPawn, sizeof(DWORD));
+		requests.emplace_back(entity.Controller.Address + Offset.PlayerController.HasHelmet, sizeof(bool));
 
-		// ALL pawn requests for this entity
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.angEyeAngles, sizeof(Vec2));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.LastCameraSetupLocalOrigin, sizeof(Vec3));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.Pos, sizeof(Vec3));
@@ -598,136 +477,232 @@ bool EntityBatchProcessor::ProcessCoreEntityData(
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.m_pWeaponServices, sizeof(DWORD64));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.CameraServices, sizeof(DWORD64));
 		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.AimPunchServices, sizeof(DWORD64));
+		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.isScoped, sizeof(bool));
+		requests.emplace_back(entity.Pawn.Address + Offset.Pawn.m_flEmitSoundTime, sizeof(float));
 	}
 
-	// Calculate total buffer size
 	SIZE_T totalSize = 0;
-	for (const auto& req : requests) {
-		totalSize += req.size;
-	}
+	for (const MemoryReadRequest& request : requests)
+		totalSize += request.size;
 
-	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer }))) {
+	std::vector<BYTE> buffer(totalSize, 0);
+	std::vector<std::uint8_t> requestSucceeded(requests.size(), 0);
+	const MemoryBatchReadResult result = memoryManager.BatchReadMemoryBestEffort(
+		requests,
+		std::as_writable_bytes(std::span{ buffer }),
+		MemoryReadPolicy::BypassDataCache,
+		requestSucceeded);
+	if (!result.completed)
 		return false;
-	}
 
-	weaponServiceAddresses.clear();
-	aimPunchServiceAddresses.clear();
-	cameraAddresses.clear();
-	weaponServiceAddresses.reserve(entities.size());
-	aimPunchServiceAddresses.reserve(entities.size());
-	cameraAddresses.reserve(entities.size());
+	weaponServiceAddresses_.assign(entities.size(), 0);
+	aimPunchServiceAddresses_.assign(entities.size(), 0);
+	cameraAddresses_.assign(entities.size(), 0);
+	std::vector<bool> keep(entities.size(), false);
+	SIZE_T bufferOffset = 0;
+	size_t requestIndex = 0;
+	for (size_t entityIndex = 0; entityIndex < entities.size(); ++entityIndex)
+	{
+		CEntity& entity = entities[entityIndex].second;
+		const size_t firstRequest = requestIndex;
+		auto readValue = [&](void* destination, const SIZE_T size)
+		{
+			if (requestSucceeded[requestIndex] != 0)
+				std::memcpy(destination, buffer.data() + bufferOffset, size);
+			bufferOffset += size;
+			++requestIndex;
+		};
 
-
-	SIZE_T currentOffset = 0;
-
-	for (auto& [entityIndex, entity] : entities) {
-
-		// Extract controller data (6 fields)
-		memcpy(&entity.Controller.Health, buffer.data() + currentOffset, sizeof(int));
-		currentOffset += sizeof(int);
-
-		memcpy(&entity.Controller.AliveStatus, buffer.data() + currentOffset, sizeof(bool));
-		currentOffset += sizeof(bool);
-
-		memcpy(&entity.Controller.TeamID, buffer.data() + currentOffset, sizeof(int));
-		currentOffset += sizeof(int);
-
-		char tempName[MAX_PATH] = { 0 };
-		memcpy(tempName, buffer.data() + currentOffset, MAX_PATH);
-		entity.Controller.PlayerName = std::string(tempName);
-		if (entity.Controller.PlayerName.empty()) {
-			entity.Controller.PlayerName = "Name_None";
+		entity.Controller.Health = 0;
+		entity.Controller.AliveStatus = false;
+		entity.Controller.TeamID = 0;
+		entity.Controller.PlayerName = "Name_None";
+		entity.Controller.SteamID = 0;
+		entity.Controller.HasHelmet = false;
+		readValue(&entity.Controller.Health, sizeof(int));
+		readValue(&entity.Controller.AliveStatus, sizeof(bool));
+		readValue(&entity.Controller.TeamID, sizeof(int));
+		if (requestSucceeded[requestIndex] != 0)
+		{
+			const char* name = reinterpret_cast<const char*>(buffer.data() + bufferOffset);
+			entity.Controller.PlayerName.assign(name, strnlen_s(name, MAX_PATH));
+			if (entity.Controller.PlayerName.empty())
+				entity.Controller.PlayerName = "Name_None";
 		}
-		currentOffset += MAX_PATH;
+		bufferOffset += MAX_PATH;
+		++requestIndex;
+		readValue(&entity.Controller.SteamID, sizeof(INT64));
+		readValue(&entity.Controller.HasHelmet, sizeof(bool));
 
-		memcpy(&entity.Controller.SteamID, buffer.data() + currentOffset, sizeof(INT64));
-		currentOffset += sizeof(INT64);
+		entity.Pawn.ViewAngle = Vec2();
+		entity.Pawn.CameraPos = {};
+		entity.Pawn.Pos = {};
+		entity.Pawn.bSpottedByMask = 0;
+		entity.Pawn.fFlags = 0;
+		entity.Pawn.ShotsFired = 0;
+		entity.Pawn.TeamID = 0;
+		entity.Pawn.Health = 0;
+		entity.Pawn.LifeState = 0xFF;
+		entity.Pawn.Armor = 0;
+		entity.Pawn.FlashDuration = 0.0f;
+		entity.Pawn.Speed = 0.0f;
+		entity.Pawn.IsScoped = false;
+		entity.Pawn.EmitSoundTime = 0.0f;
+		entity.Pawn.EmitSoundTimeValid = false;
+		readValue(&entity.Pawn.ViewAngle, sizeof(Vec2));
+		readValue(&entity.Pawn.CameraPos, sizeof(Vec3));
+		readValue(&entity.Pawn.Pos, sizeof(Vec3));
+		readValue(&entity.Pawn.bSpottedByMask, sizeof(DWORD64));
+		readValue(&entity.Pawn.fFlags, sizeof(int));
+		readValue(&entity.Pawn.ShotsFired, sizeof(DWORD));
+		readValue(&entity.Pawn.TeamID, sizeof(int));
+		readValue(&entity.Pawn.Health, sizeof(int));
+		readValue(&entity.Pawn.LifeState, sizeof(BYTE));
+		readValue(&entity.Pawn.Armor, sizeof(int));
+		readValue(&entity.Pawn.FlashDuration, sizeof(float));
+		Vec3 velocity{};
+		const bool velocityReady = requestSucceeded[requestIndex] != 0;
+		readValue(&velocity, sizeof(Vec3));
+		if (velocityReady)
+			entity.Pawn.Speed = sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+		readValue(&weaponServiceAddresses_[entityIndex], sizeof(DWORD64));
+		readValue(&cameraAddresses_[entityIndex], sizeof(DWORD64));
+		readValue(&aimPunchServiceAddresses_[entityIndex], sizeof(DWORD64));
+		readValue(&entity.Pawn.IsScoped, sizeof(bool));
+		const bool soundReady = requestSucceeded[requestIndex] != 0;
+		readValue(&entity.Pawn.EmitSoundTime, sizeof(float));
+		entity.Pawn.EmitSoundTimeValid = soundReady;
 
-		/*memcpy(&entity.Controller.m_nTickBase, buffer.data() + currentOffset, sizeof(DWORD));
-		currentOffset += sizeof(DWORD);*/
-
-		memcpy(&entity.Controller.Pawn, buffer.data() + currentOffset, sizeof(DWORD));
-		currentOffset += sizeof(DWORD);
-
-		// Extract pawn core data (15 fields)
-		memcpy(&entity.Pawn.ViewAngle, buffer.data() + currentOffset, sizeof(Vec2));
-		currentOffset += sizeof(Vec2);
-
-		memcpy(&entity.Pawn.CameraPos, buffer.data() + currentOffset, sizeof(Vec3));
-		currentOffset += sizeof(Vec3);
-
-		memcpy(&entity.Pawn.Pos, buffer.data() + currentOffset, sizeof(Vec3));
-		currentOffset += sizeof(Vec3);
-
-		memcpy(&entity.Pawn.bSpottedByMask, buffer.data() + currentOffset, sizeof(DWORD64));
-		currentOffset += sizeof(DWORD64);
-
-		memcpy(&entity.Pawn.fFlags, buffer.data() + currentOffset, sizeof(int));
-		currentOffset += sizeof(int);
-
-		memcpy(&entity.Pawn.ShotsFired, buffer.data() + currentOffset, sizeof(DWORD));
-		currentOffset += sizeof(DWORD);
-
-		memcpy(&entity.Pawn.TeamID, buffer.data() + currentOffset, sizeof(int));
-		currentOffset += sizeof(int);
-
-		memcpy(&entity.Pawn.Health, buffer.data() + currentOffset, sizeof(int));
-		currentOffset += sizeof(int);
-
-		memcpy(&entity.Pawn.LifeState, buffer.data() + currentOffset, sizeof(BYTE));
-		currentOffset += sizeof(BYTE);
-
-		memcpy(&entity.Pawn.Armor, buffer.data() + currentOffset, sizeof(int));
-		currentOffset += sizeof(int);
-
-		memcpy(&entity.Pawn.FlashDuration, buffer.data() + currentOffset, sizeof(float));
-		currentOffset += sizeof(float);
-
-		//memcpy(&entity.Pawn.isDefusing, buffer.data() + currentOffset, sizeof(bool));
-		//currentOffset += sizeof(bool);
-
-		// Calculate velocity
-		Vec3 velocity;
-		memcpy(&velocity, buffer.data() + currentOffset, sizeof(Vec3));
-		entity.Pawn.Speed = sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-		currentOffset += sizeof(Vec3);
-
-		// Extract dependent service addresses
-		DWORD64 weaponServiceAddr, cameraAddr, aimPunchServiceAddr;
-		memcpy(&weaponServiceAddr, buffer.data() + currentOffset, sizeof(DWORD64));
-		currentOffset += sizeof(DWORD64);
-
-		memcpy(&cameraAddr, buffer.data() + currentOffset, sizeof(DWORD64));
-		currentOffset += sizeof(DWORD64);
-
-		memcpy(&aimPunchServiceAddr, buffer.data() + currentOffset, sizeof(DWORD64));
-		currentOffset += sizeof(DWORD64);
-
-		weaponServiceAddresses.push_back(weaponServiceAddr);
-		aimPunchServiceAddresses.push_back(aimPunchServiceAddr);
-		cameraAddresses.push_back(cameraAddr);
+		keep[entityIndex] =
+			requestSucceeded[firstRequest + 1] != 0 &&
+			requestSucceeded[firstRequest + 2] != 0 &&
+			requestSucceeded[firstRequest + 3] != 0 &&
+			requestSucceeded[firstRequest + 6] != 0 &&
+			requestSucceeded[firstRequest + 8] != 0 &&
+			requestSucceeded[firstRequest + 13] != 0 &&
+			requestSucceeded[firstRequest + 14] != 0;
 	}
 
+	std::vector<std::pair<int, CEntity>> keptEntities;
+	std::vector<DWORD64> keptWeaponServices;
+	std::vector<DWORD64> keptAimPunchServices;
+	std::vector<DWORD64> keptCameras;
+	keptEntities.reserve(entities.size());
+	keptWeaponServices.reserve(entities.size());
+	keptAimPunchServices.reserve(entities.size());
+	keptCameras.reserve(entities.size());
+	for (size_t index = 0; index < entities.size(); ++index)
+	{
+		if (!keep[index])
+			continue;
+		keptEntities.push_back(std::move(entities[index]));
+		keptWeaponServices.push_back(weaponServiceAddresses_[index]);
+		keptAimPunchServices.push_back(aimPunchServiceAddresses_[index]);
+		keptCameras.push_back(cameraAddresses_[index]);
+	}
+
+	entities = std::move(keptEntities);
+	weaponServiceAddresses_ = std::move(keptWeaponServices);
+	aimPunchServiceAddresses_ = std::move(keptAimPunchServices);
+	cameraAddresses_ = std::move(keptCameras);
 	return true;
 }
 
-bool EntityBatchProcessor::ProcessRadarWeaponNames(
-	std::vector<std::pair<int, CEntity>>& entities,
-	const std::vector<DWORD64>& weaponAddresses) {
+bool EntityBatchProcessor::ProcessServiceData(
+	std::vector<std::pair<int, CEntity>>& entities)
+{
+	struct RequestMap
+	{
+		size_t entityIndex;
+		bool activeWeapon;
+	};
 
 	std::vector<MemoryReadRequest> requests;
+	std::vector<RequestMap> requestMap;
+	requests.reserve(entities.size() * 2);
+	requestMap.reserve(entities.size() * 2);
+	std::vector<DWORD> activeWeaponHandles(entities.size(), 0);
+	for (size_t index = 0; index < entities.size(); ++index)
+	{
+		entities[index].second.Pawn.AimPunchAngle = Vec2();
+		if (weaponServiceAddresses_[index] != 0)
+		{
+			requests.emplace_back(
+				weaponServiceAddresses_[index] + Offset.WeaponBaseData.hActiveWeapon,
+				sizeof(DWORD));
+			requestMap.push_back({ index, true });
+		}
+		if (aimPunchServiceAddresses_[index] != 0)
+		{
+			requests.emplace_back(
+				aimPunchServiceAddresses_[index] + Offset.Pawn.PredictableAimPunchAngle,
+				sizeof(Vec2));
+			requestMap.push_back({ index, false });
+		}
+	}
+
+	weaponAddresses_.assign(entities.size(), 0);
+	if (requests.empty())
+		return true;
+
+	SIZE_T totalSize = 0;
+	for (const MemoryReadRequest& request : requests)
+		totalSize += request.size;
+	std::vector<BYTE> buffer(totalSize, 0);
+	std::vector<std::uint8_t> requestSucceeded(requests.size(), 0);
+	const MemoryBatchReadResult result = memoryManager.BatchReadMemoryBestEffort(
+		requests,
+		std::as_writable_bytes(std::span{ buffer }),
+		MemoryReadPolicy::BypassDataCache,
+		requestSucceeded);
+	if (!result.completed)
+		return false;
+
+	SIZE_T bufferOffset = 0;
+	for (size_t requestIndex = 0; requestIndex < requestMap.size(); ++requestIndex)
+	{
+		const RequestMap& mapping = requestMap[requestIndex];
+		if (mapping.activeWeapon)
+		{
+			if (requestSucceeded[requestIndex] != 0)
+				std::memcpy(&activeWeaponHandles[mapping.entityIndex], buffer.data() + bufferOffset, sizeof(DWORD));
+			bufferOffset += sizeof(DWORD);
+		}
+		else
+		{
+			if (requestSucceeded[requestIndex] != 0)
+			{
+				std::memcpy(
+					&entities[mapping.entityIndex].second.Pawn.AimPunchAngle,
+					buffer.data() + bufferOffset,
+					sizeof(Vec2));
+			}
+			bufferOffset += sizeof(Vec2);
+		}
+	}
+
+	std::vector<std::uint8_t> resolvedSucceeded(entities.size(), 0);
+	const MemoryBatchReadResult resolveResult = gGame.ResolveEntityHandles(
+		activeWeaponHandles,
+		weaponAddresses_,
+		resolvedSucceeded);
+	return resolveResult.completed;
+}
+
+bool EntityBatchProcessor::ProcessRadarWeaponNames(
+	std::vector<std::pair<int, CEntity>>& entities)
+{
+	std::vector<MemoryReadRequest> requests;
 	std::vector<size_t> entityIndices;
-	requests.reserve(weaponAddresses.size());
-	entityIndices.reserve(weaponAddresses.size());
-
-	for (size_t index = 0; index < weaponAddresses.size(); ++index) {
+	for (size_t index = 0; index < weaponAddresses_.size(); ++index)
+	{
 		entities[index].second.Pawn.WeaponName.clear();
-		if (weaponAddresses[index] == 0)
+		if (weaponAddresses_[index] == 0)
 			continue;
-
-		requests.emplace_back(weaponAddresses[index] + Offset.EconEntity.AttributeManager
-			+ Offset.WeaponBaseData.Item + Offset.WeaponBaseData.ItemDefinitionIndex, sizeof(short));
+		requests.emplace_back(
+			weaponAddresses_[index] + Offset.EconEntity.AttributeManager +
+				Offset.WeaponBaseData.Item + Offset.WeaponBaseData.ItemDefinitionIndex,
+			sizeof(short));
 		entityIndices.push_back(index);
 	}
 
@@ -735,218 +710,324 @@ bool EntityBatchProcessor::ProcessRadarWeaponNames(
 		return true;
 
 	std::vector<short> weaponIndices(requests.size(), -1);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ weaponIndices })))
+	std::vector<std::uint8_t> requestSucceeded(requests.size(), 0);
+	const MemoryBatchReadResult result = memoryManager.BatchReadMemoryBestEffort(
+		requests,
+		std::as_writable_bytes(std::span{ weaponIndices }),
+		MemoryReadPolicy::BypassDataCache,
+		requestSucceeded);
+	if (!result.completed)
 		return false;
 
 	for (size_t index = 0; index < entityIndices.size(); ++index)
-		entities[entityIndices[index]].second.Pawn.WeaponName = CEntity::GetWeaponName(weaponIndices[index]);
-
+	{
+		if (requestSucceeded[index] != 0)
+			entities[entityIndices[index]].second.Pawn.WeaponName =
+				CEntity::GetWeaponName(weaponIndices[index]);
+	}
 	return true;
 }
 
-bool EntityBatchProcessor::ProcessServiceData(
-	std::vector<std::pair<int, CEntity>>& entities,
-	const std::vector<DWORD64>& weaponServiceAddresses,
-	const std::vector<DWORD64>& aimPunchServiceAddresses,
-	std::vector<DWORD64>& weaponAddresses) {
+bool EntityBatchProcessor::ProcessWeaponData(
+	std::vector<std::pair<int, CEntity>>& entities)
+{
+	struct RequestMap
+	{
+		size_t entityIndex;
+		bool ammo;
+	};
 
 	std::vector<MemoryReadRequest> requests;
-	std::vector<std::pair<size_t, bool>> requestMap; // entity index, active weapon request
-	requests.reserve(entities.size() * 2);
-	requestMap.reserve(entities.size() * 2);
-	weaponAddresses.assign(entities.size(), 0);
-
-	for (size_t i = 0; i < entities.size(); ++i) {
-		entities[i].second.Pawn.AimPunchAngle = Vec2();
-
-		if (weaponServiceAddresses[i] != 0) {
-			requests.emplace_back(weaponServiceAddresses[i] + Offset.WeaponBaseData.hActiveWeapon, sizeof(DWORD));
-			requestMap.emplace_back(i, true);
-		}
-
-		if (aimPunchServiceAddresses[i] != 0) {
-			requests.emplace_back(aimPunchServiceAddresses[i] + Offset.Pawn.PredictableAimPunchAngle, sizeof(Vec2));
-			requestMap.emplace_back(i, false);
-		}
+	std::vector<RequestMap> requestMap;
+	for (size_t index = 0; index < weaponAddresses_.size(); ++index)
+	{
+		entities[index].second.Pawn.Ammo = 0;
+		if (weaponAddresses_[index] == 0)
+			continue;
+		requests.emplace_back(weaponAddresses_[index] + Offset.WeaponBaseData.Clip1, sizeof(int));
+		requestMap.push_back({ index, true });
+		requests.emplace_back(
+			weaponAddresses_[index] + Offset.EconEntity.AttributeManager +
+				Offset.WeaponBaseData.Item + Offset.WeaponBaseData.ItemDefinitionIndex,
+			sizeof(short));
+		requestMap.push_back({ index, false });
 	}
 
 	if (requests.empty())
 		return true;
 
 	SIZE_T totalSize = 0;
-	for (const auto& request : requests)
+	for (const MemoryReadRequest& request : requests)
 		totalSize += request.size;
-
-	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer })))
+	std::vector<BYTE> buffer(totalSize, 0);
+	std::vector<std::uint8_t> requestSucceeded(requests.size(), 0);
+	const MemoryBatchReadResult result = memoryManager.BatchReadMemoryBestEffort(
+		requests,
+		std::as_writable_bytes(std::span{ buffer }),
+		MemoryReadPolicy::BypassDataCache,
+		requestSucceeded);
+	if (!result.completed)
 		return false;
 
 	SIZE_T bufferOffset = 0;
-	for (const auto& [entityIndex, isActiveWeapon] : requestMap) {
-		if (isActiveWeapon) {
-			DWORD activeWeaponHandle = 0;
-			memcpy(&activeWeaponHandle, buffer.data() + bufferOffset, sizeof(DWORD));
-			bufferOffset += sizeof(DWORD);
-
-			if (activeWeaponHandle != 0 && activeWeaponHandle != 0xFFFFFFFF)
-				weaponAddresses[entityIndex] = CEntity::ResolveEntityHandle(activeWeaponHandle);
+	for (size_t requestIndex = 0; requestIndex < requestMap.size(); ++requestIndex)
+	{
+		const RequestMap& mapping = requestMap[requestIndex];
+		if (mapping.ammo)
+		{
+			if (requestSucceeded[requestIndex] != 0)
+				std::memcpy(&entities[mapping.entityIndex].second.Pawn.Ammo, buffer.data() + bufferOffset, sizeof(int));
+			bufferOffset += sizeof(int);
 		}
-		else {
-			memcpy(&entities[entityIndex].second.Pawn.AimPunchAngle,
-				buffer.data() + bufferOffset, sizeof(Vec2));
-			bufferOffset += sizeof(Vec2);
-		}
-	}
-
-	return true;
-}
-
-bool EntityBatchProcessor::ProcessWeaponData(
-	std::vector<std::pair<int, CEntity>>& entities,
-	const std::vector<DWORD64>& weaponAddresses,
-	std::vector<DWORD64>& weaponDataAddresses) {
-
-	std::vector<MemoryReadRequest> requests;
-	std::vector<size_t> validWeaponIndices;
-
-	// Build requests only for valid weapon addresses
-	for (size_t i = 0; i < weaponAddresses.size(); ++i) {
-		if (weaponAddresses[i] != 0) {
-			validWeaponIndices.push_back(i);
-			requests.emplace_back(weaponAddresses[i] + Offset.WeaponBaseData.Clip1, sizeof(int));
-			requests.emplace_back(weaponAddresses[i] + Offset.WeaponBaseData.WeaponDataPTR, sizeof(DWORD64));
-			requests.emplace_back(weaponAddresses[i] + Offset.EconEntity.AttributeManager +
-				Offset.WeaponBaseData.Item + Offset.WeaponBaseData.ItemDefinitionIndex, sizeof(short));
-		}
-	}
-
-	weaponDataAddresses.clear();
-	weaponDataAddresses.resize(entities.size(), 0);
-
-	if (requests.empty()) {
-		// No valid weapons, set defaults
-		for (auto& [entityIndex, entity] : entities) {
-			entity.Pawn.Ammo = 0;
-			entity.Pawn.WeaponName = "Weapon_None";
-		}
-		return true;
-	}
-
-	SIZE_T totalSize = 0;
-	for (const auto& req : requests) {
-		totalSize += req.size;
-	}
-
-	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer }))) {
-		return false;
-	}
-
-
-	// Extract weapon data
-	SIZE_T bufferOffset = 0;
-	const SIZE_T WEAPON_DATA_SIZE = sizeof(int) + sizeof(DWORD64) + sizeof(short);
-
-	for (size_t i = 0; i < validWeaponIndices.size(); ++i) {
-		size_t entityIndex = validWeaponIndices[i];
-		auto& entity = entities[entityIndex].second;
-
-		// Extract ammo
-		int ammo;
-		memcpy(&ammo, buffer.data() + bufferOffset, sizeof(int));
-		entity.Pawn.Ammo = ammo;
-		bufferOffset += sizeof(int);
-
-		// Extract weapon data address
-		DWORD64 weaponDataAddr;
-		memcpy(&weaponDataAddr, buffer.data() + bufferOffset, sizeof(DWORD64));
-		weaponDataAddresses[entityIndex] = weaponDataAddr;
-		bufferOffset += sizeof(DWORD64);
-
-		// Extract weapon index and set name
-		short weaponIndex;
-		memcpy(&weaponIndex, buffer.data() + bufferOffset, sizeof(short));
-		bufferOffset += sizeof(short);
-
-		if (weaponIndex != -1) {
-			auto it = CEntity::weaponNames.find(weaponIndex);
-			entity.Pawn.WeaponName = (it != CEntity::weaponNames.end()) ? it->second : "Weapon_None";
-		}
-		else {
-			entity.Pawn.WeaponName = "Weapon_None";
-		}
-	}
-
-	// Set defaults for entities without weapons
-	for (size_t i = 0; i < entities.size(); ++i) {
-		if (weaponAddresses[i] == 0) {
-			entities[i].second.Pawn.Ammo = 0;
-			entities[i].second.Pawn.WeaponName = "Weapon_None";
+		else
+		{
+			if (requestSucceeded[requestIndex] != 0)
+			{
+				short weaponIndex = -1;
+				std::memcpy(&weaponIndex, buffer.data() + bufferOffset, sizeof(short));
+				entities[mapping.entityIndex].second.Pawn.WeaponName = CEntity::GetWeaponName(weaponIndex);
+			}
+			bufferOffset += sizeof(short);
 		}
 	}
 	return true;
 }
 
 bool EntityBatchProcessor::ProcessDependenciesData(
-	std::vector<std::pair<int, CEntity>>& entities,
-	const std::vector<DWORD64>& weaponDataAddresses,
-	const std::vector<DWORD64>& cameraAddresses) {
-
+	std::vector<std::pair<int, CEntity>>& entities)
+{
 	std::vector<MemoryReadRequest> requests;
-	std::vector/*<std::pair*/<size_t/*, bool*/> requestMap; // entityIndex, isMaxAmmo
-
-	// Build requests for max ammo and FOV
-	for (size_t i = 0; i < entities.size(); ++i) {
-		//if (weaponDataAddresses[i] != 0) {
-			//requests.emplace_back(weaponDataAddresses[i] + Offset.WeaponBaseData.MaxClip, sizeof(int));
-			//requestMap.emplace_back(i, true); // true = maxAmmo
-		//}
-		if (cameraAddresses[i] != 0) {
-			requests.emplace_back(cameraAddresses[i] + Offset.Pawn.iFovStart, sizeof(int));
-			requestMap.emplace_back(i/*, false*/); // false = FOV
-		}
+	std::vector<size_t> entityIndices;
+	for (size_t index = 0; index < cameraAddresses_.size(); ++index)
+	{
+		entities[index].second.Pawn.Fov = 90;
+		if (cameraAddresses_[index] == 0)
+			continue;
+		requests.emplace_back(cameraAddresses_[index] + Offset.Pawn.iFovStart, sizeof(int));
+		entityIndices.push_back(index);
 	}
 
-	if (requests.empty()) {
-		// Set defaults
-		for (auto& [entityIndex, entity] : entities) {
-			//entity.Pawn.MaxAmmo = 0;
-			entity.Pawn.Fov = 90;
-		}
+	if (requests.empty())
 		return true;
-	}
 
-	SIZE_T totalSize = 0;
-	for (const auto& req : requests) {
-		totalSize += req.size;
-	}
-
-	std::vector<BYTE> buffer(totalSize);
-	if (!memoryManager.BatchReadMemoryBestEffort(requests, std::as_writable_bytes(std::span{ buffer }))) {
+	std::vector<int> fovValues(requests.size(), 90);
+	std::vector<std::uint8_t> requestSucceeded(requests.size(), 0);
+	const MemoryBatchReadResult result = memoryManager.BatchReadMemoryBestEffort(
+		requests,
+		std::as_writable_bytes(std::span{ fovValues }),
+		MemoryReadPolicy::BypassDataCache,
+		requestSucceeded);
+	if (!result.completed)
 		return false;
+
+	for (size_t index = 0; index < entityIndices.size(); ++index)
+	{
+		if (requestSucceeded[index] != 0)
+			entities[entityIndices[index]].second.Pawn.Fov = fovValues[index];
+	}
+	return true;
+}
+
+void EntityBatchProcessor::ProcessInventoryData(
+	std::vector<std::pair<int, CEntity>>& entities)
+{
+	struct InventoryHeader
+	{
+		int count = 0;
+		DWORD64 data = 0;
+	};
+
+	std::vector<MemoryReadRequest> headerRequests;
+	std::vector<size_t> headerOwners;
+	for (size_t index = 0; index < weaponServiceAddresses_.size(); ++index)
+	{
+		entities[index].second.Pawn.HasC4 = false;
+		if (weaponServiceAddresses_[index] == 0)
+			continue;
+		headerRequests.emplace_back(
+			weaponServiceAddresses_[index] + Offset.WeaponBaseData.hMyWeapons,
+			sizeof(int));
+		headerRequests.emplace_back(
+			weaponServiceAddresses_[index] + Offset.WeaponBaseData.hMyWeapons + 0x8,
+			sizeof(DWORD64));
+		headerOwners.push_back(index);
+	}
+	if (headerRequests.empty())
+		return;
+
+	SIZE_T headerSize = 0;
+	for (const MemoryReadRequest& request : headerRequests)
+		headerSize += request.size;
+	std::vector<BYTE> headerBuffer(headerSize, 0);
+	std::vector<std::uint8_t> headerSucceeded(headerRequests.size(), 0);
+	const MemoryBatchReadResult headerResult = memoryManager.BatchReadMemoryBestEffort(
+		headerRequests,
+		std::as_writable_bytes(std::span{ headerBuffer }),
+		MemoryReadPolicy::BypassDataCache,
+		headerSucceeded);
+	if (!headerResult.completed)
+		return;
+
+	std::vector<InventoryHeader> inventories(entities.size());
+	SIZE_T headerOffset = 0;
+	for (size_t index = 0; index < headerOwners.size(); ++index)
+	{
+		const size_t owner = headerOwners[index];
+		if (headerSucceeded[index * 2] != 0)
+			std::memcpy(&inventories[owner].count, headerBuffer.data() + headerOffset, sizeof(int));
+		headerOffset += sizeof(int);
+		if (headerSucceeded[index * 2 + 1] != 0)
+			std::memcpy(&inventories[owner].data, headerBuffer.data() + headerOffset, sizeof(DWORD64));
+		headerOffset += sizeof(DWORD64);
 	}
 
-	// Initialize defaults
-	for (auto& [entityIndex, entity] : entities) {
-		//entity.Pawn.MaxAmmo = 0;
-		entity.Pawn.Fov = 90;
+	std::vector<MemoryReadRequest> handleRequests;
+	std::vector<size_t> handleOwners;
+	for (size_t owner = 0; owner < inventories.size(); ++owner)
+	{
+		const InventoryHeader& inventory = inventories[owner];
+		if (inventory.count < 1 || inventory.count > 64 || inventory.data == 0)
+			continue;
+		for (int item = 0; item < inventory.count; ++item)
+		{
+			handleRequests.emplace_back(inventory.data + item * sizeof(DWORD), sizeof(DWORD));
+			handleOwners.push_back(owner);
+		}
+	}
+	if (handleRequests.empty())
+		return;
+
+	std::vector<DWORD> handles(handleRequests.size(), 0);
+	std::vector<std::uint8_t> handleSucceeded(handleRequests.size(), 0);
+	const MemoryBatchReadResult handleResult = memoryManager.BatchReadMemoryBestEffort(
+		handleRequests,
+		std::as_writable_bytes(std::span{ handles }),
+		MemoryReadPolicy::BypassDataCache,
+		handleSucceeded);
+	if (!handleResult.completed)
+		return;
+	for (size_t index = 0; index < handles.size(); ++index)
+	{
+		if (handleSucceeded[index] == 0)
+			handles[index] = 0;
 	}
 
-	// Extract final data
-	SIZE_T bufferOffset = 0;
-	for (const auto& entityIndex/*[entityIndex, isMaxAmmo]*/ : requestMap) {
-		auto& entity = entities[entityIndex].second;
+	std::vector<DWORD64> weaponEntities(handles.size(), 0);
+	std::vector<std::uint8_t> resolveSucceeded(handles.size(), 0);
+	const MemoryBatchReadResult resolveResult = gGame.ResolveEntityHandles(
+		handles,
+		weaponEntities,
+		resolveSucceeded);
+	if (!resolveResult.completed)
+		return;
 
-		int value;
-		memcpy(&value, buffer.data() + bufferOffset, sizeof(int));
-		bufferOffset += sizeof(int);
+	std::vector<MemoryReadRequest> itemRequests;
+	std::vector<size_t> itemOwners;
+	for (size_t index = 0; index < weaponEntities.size(); ++index)
+	{
+		if (resolveSucceeded[index] == 0 || weaponEntities[index] == 0)
+			continue;
+		itemRequests.emplace_back(
+			weaponEntities[index] + Offset.EconEntity.AttributeManager +
+				Offset.WeaponBaseData.Item + Offset.WeaponBaseData.ItemDefinitionIndex,
+			sizeof(short));
+		itemOwners.push_back(handleOwners[index]);
+	}
+	if (itemRequests.empty())
+		return;
 
-		//if (isMaxAmmo) {
-		//	entity.Pawn.MaxAmmo = value;
-		//}
-		//else {
-			entity.Pawn.Fov = value;
-		//}
+	std::vector<short> itemIndices(itemRequests.size(), -1);
+	std::vector<std::uint8_t> itemSucceeded(itemRequests.size(), 0);
+	const MemoryBatchReadResult itemResult = memoryManager.BatchReadMemoryBestEffort(
+		itemRequests,
+		std::as_writable_bytes(std::span{ itemIndices }),
+		MemoryReadPolicy::BypassDataCache,
+		itemSucceeded);
+	if (!itemResult.completed)
+		return;
+	for (size_t index = 0; index < itemIndices.size(); ++index)
+	{
+		if (itemSucceeded[index] != 0 && itemIndices[index] == 49)
+			entities[itemOwners[index]].second.Pawn.HasC4 = true;
+	}
+}
+
+bool EntityBatchProcessor::ProcessBoneData(
+	std::vector<std::pair<int, CEntity>>& entities)
+{
+	constexpr SIZE_T BoneCount = static_cast<SIZE_T>(BONEINDEX::ankle_R) + 1;
+	constexpr SIZE_T BoneBlockSize = BoneCount * sizeof(BoneMemoryRecord);
+	for (auto& [entityIndex, entity] : entities)
+		entity.Pawn.BoneData = {};
+
+	std::vector<MemoryReadRequest> sceneRequests;
+	sceneRequests.reserve(entities.size());
+	for (const auto& [entityIndex, entity] : entities)
+		sceneRequests.emplace_back(entity.Pawn.Address + Offset.Pawn.GameSceneNode, sizeof(DWORD64));
+
+	std::vector<DWORD64> sceneNodes(entities.size(), 0);
+	std::vector<std::uint8_t> sceneSucceeded(entities.size(), 0);
+	const MemoryBatchReadResult sceneResult = memoryManager.BatchReadMemoryBestEffort(
+		sceneRequests,
+		std::as_writable_bytes(std::span{ sceneNodes }),
+		MemoryReadPolicy::BypassDataCache,
+		sceneSucceeded);
+	if (!sceneResult.completed)
+		return false;
+
+	std::vector<MemoryReadRequest> arrayRequests;
+	std::vector<size_t> arrayEntityIndices;
+	for (size_t index = 0; index < sceneNodes.size(); ++index)
+	{
+		if (sceneSucceeded[index] == 0 || sceneNodes[index] == 0)
+			continue;
+		arrayRequests.emplace_back(sceneNodes[index] + Offset.Pawn.BoneArray, sizeof(DWORD64));
+		arrayEntityIndices.push_back(index);
+	}
+	if (arrayRequests.empty())
+		return true;
+
+	std::vector<DWORD64> boneArrays(arrayRequests.size(), 0);
+	std::vector<std::uint8_t> arraySucceeded(arrayRequests.size(), 0);
+	const MemoryBatchReadResult arrayResult = memoryManager.BatchReadMemoryBestEffort(
+		arrayRequests,
+		std::as_writable_bytes(std::span{ boneArrays }),
+		MemoryReadPolicy::BypassDataCache,
+		arraySucceeded);
+	if (!arrayResult.completed)
+		return false;
+
+	std::vector<MemoryReadRequest> blockRequests;
+	std::vector<size_t> blockEntityIndices;
+	for (size_t index = 0; index < boneArrays.size(); ++index)
+	{
+		if (arraySucceeded[index] == 0 || boneArrays[index] == 0)
+			continue;
+		blockRequests.emplace_back(boneArrays[index], BoneBlockSize);
+		blockEntityIndices.push_back(arrayEntityIndices[index]);
+	}
+	if (blockRequests.empty())
+		return true;
+
+	std::vector<std::byte> boneBlocks(blockRequests.size() * BoneBlockSize);
+	std::vector<std::uint8_t> blockSucceeded(blockRequests.size(), 0);
+	const MemoryBatchReadResult blockResult = memoryManager.BatchReadMemoryBestEffort(
+		blockRequests,
+		boneBlocks,
+		MemoryReadPolicy::BypassDataCache,
+		blockSucceeded);
+	if (!blockResult.completed)
+		return false;
+
+	for (size_t index = 0; index < blockRequests.size(); ++index)
+	{
+		if (blockSucceeded[index] == 0)
+			continue;
+		const size_t entityIndex = blockEntityIndices[index];
+		entities[entityIndex].second.Pawn.BoneData.LoadBoneBlock(
+			entities[entityIndex].second.Pawn.Address,
+			sceneNodes[entityIndex],
+			std::span<const std::byte>(boneBlocks).subspan(index * BoneBlockSize, BoneBlockSize));
 	}
 	return true;
 }

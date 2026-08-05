@@ -458,7 +458,7 @@ namespace
             return STATUS_BUFFER_TOO_SMALL;
         }
 
-        const auto header = static_cast<const BatchReadHeader*>(systemBuffer);
+        auto header = static_cast<BatchReadHeader*>(systemBuffer);
         if (header->process_id == nullptr || header->num_requests == 0 ||
             header->num_requests > MaxBatchRequests ||
             header->total_buffer_size == 0 || header->total_buffer_size > MaxBatchOutputSize)
@@ -482,9 +482,14 @@ namespace
             return STATUS_INVALID_BUFFER_SIZE;
         }
 
-        const auto requests = reinterpret_cast<const BatchReadRequest*>(
-            static_cast<const UCHAR*>(systemBuffer) + sizeof(BatchReadHeader));
+        auto requests = reinterpret_cast<BatchReadRequest*>(
+            static_cast<UCHAR*>(systemBuffer) + sizeof(BatchReadHeader));
         auto output = static_cast<UCHAR*>(systemBuffer) + requestStructureSize;
+
+        header->successful_requests = 0;
+        RtlSecureZeroMemory(output, header->total_buffer_size);
+        for (ULONG index = 0; index < header->num_requests; ++index)
+            requests[index].succeeded = 0;
 
         SIZE_T expectedOffset = 0;
         for (ULONG index = 0; index < header->num_requests; ++index)
@@ -505,32 +510,34 @@ namespace
             return STATUS_INVALID_PARAMETER;
 
         PEPROCESS process = nullptr;
-        NTSTATUS status = LookupProcess(header->process_id, &process);
-        if (!NT_SUCCESS(status))
-            return status;
+        const NTSTATUS lookupStatus = LookupProcess(header->process_id, &process);
+        if (!NT_SUCCESS(lookupStatus))
+            return lookupStatus;
 
         KAPC_STATE apcState{};
         KeStackAttachProcess(process, &apcState);
         for (ULONG index = 0; index < header->num_requests; ++index)
         {
-            const auto& request = requests[index];
-            status = CopyFromAttachedProcess(
+            auto& request = requests[index];
+            const NTSTATUS readStatus = CopyFromAttachedProcess(
                 request.address,
                 output + request.offset_in_buffer,
                 request.size);
-            if (!NT_SUCCESS(status))
-                break;
+            if (NT_SUCCESS(readStatus))
+            {
+                request.succeeded = 1;
+                ++header->successful_requests;
+            }
+            else
+            {
+                RtlSecureZeroMemory(output + request.offset_in_buffer, request.size);
+            }
         }
         KeUnstackDetachProcess(&apcState);
 
         ObDereferenceObject(process);
-
-        if (NT_SUCCESS(status))
-            *information = totalSize;
-        else
-            RtlSecureZeroMemory(output, header->total_buffer_size);
-
-        return status;
+        *information = totalSize;
+        return STATUS_SUCCESS;
     }
 
     NTSTATUS DispatchUnsupported(PDEVICE_OBJECT deviceObject, PIRP irp)

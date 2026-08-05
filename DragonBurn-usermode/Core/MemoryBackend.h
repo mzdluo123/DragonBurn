@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 
@@ -40,6 +41,12 @@ struct MemoryReadRequest
     SIZE_T size;
 };
 
+struct MemoryBatchReadResult
+{
+    bool completed = false;
+    SIZE_T successfulRequests = 0;
+};
+
 inline constexpr SIZE_T MaxSingleMemoryReadSize = 0x1000;
 inline constexpr SIZE_T MaxBatchMemoryRequests = 4096;
 inline constexpr SIZE_T MaxBatchMemoryOutputSize = 4 * 1024 * 1024;
@@ -63,8 +70,9 @@ public:
         DWORD64 address,
         std::span<std::byte> output,
         MemoryReadPolicy policy) = 0;
-    virtual bool ReadBatch(
+    virtual MemoryBatchReadResult ReadBatch(
         std::span<const MemoryReadRequest> requests,
         std::span<std::byte> output,
-        MemoryReadPolicy policy) = 0;
+        MemoryReadPolicy policy,
+        std::span<std::uint8_t> requestSucceeded) = 0;
 };

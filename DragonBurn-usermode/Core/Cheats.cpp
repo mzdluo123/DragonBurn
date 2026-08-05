@@ -12,10 +12,7 @@
 
 #include <string>
 #include <thread>
-#include <future>
-#include <iostream>
 #include <cmath>
-#include <limits>
 
 #include "Cheats.h"
 #include "Render.h"
@@ -28,7 +25,6 @@
 #include "../Features/RCS.H"
 #include "../Features/BombTimer.h"
 #include "../Features/SpectatorList.h"
-#include "../Helpers/Logger.h"
 #include "../Features/SoundESP.h"
 #include "../Features/WebRadar.h"
 
@@ -43,15 +39,46 @@ void MiscFuncs(CEntity&, bool);
 void RenderCrosshair(ImDrawList*, const CEntity&);
 void RadarSetting(Base_Radar&);
 
+namespace
+{
+	struct EntitySnapshot
+	{
+		DWORD tick = 0;
+		UINT64 entityListGeneration = 0;
+		std::string mapName;
+		DWORD64 localControllerAddress = 0;
+		DWORD64 localPawnAddress = 0;
+		CEntity localEntity;
+		int localPlayerControllerIndex = -1;
+		std::vector<std::pair<int, CEntity>> entities;
+		bool foregroundReady = false;
+		bool valid = false;
+	};
+
+	DWORD m_currentTick = 0;
+	DWORD previousFeatureTick = 0;
+	EntitySnapshot entitySnapshot;
+	std::vector<std::pair<int, CEntity>> featureEntityCache;
+
+	void InvalidateEntityState()
+	{
+		entitySnapshot = {};
+		featureEntityCache.clear();
+		previousFeatureTick = 0;
+		gGame.InvalidateEntityListCache();
+		WebRadar::Invalidate();
+		AimControl::ResetRuntime();
+		RCS::ResetRuntime();
+	}
+}
+
 void Cheats::Run()
-{	
+{
 	Menu();
 
 	const bool allowGameInput = memoryManager.GetBackendKind() == MemoryBackendKind::Driver;
 	if (allowGameInput)
-	{
 		Misc::AutoAccept::UpdateAutoAccept();
-	}
 	else
 	{
 		AimControl::ResetRuntime();
@@ -62,224 +89,341 @@ void Cheats::Run()
 	const bool backgroundRadarOnly = allowGameInput
 		? foregroundWindow != Init::Client::GetGameWindow() && foregroundWindow != Gui.Window.hWnd
 		: foregroundWindow != Gui.Window.hWnd;
+	const bool matrixReady =
+		memoryManager.ReadMemory(gGame.GetMatrixAddress(), gGame.View.Matrix, 64);
 
-	// Update matrix
-	const bool matrixReady = memoryManager.ReadMemory(gGame.GetMatrixAddress(), gGame.View.Matrix, 64);
-
-	// Update EntityList Entry
-	gGame.UpdateEntityListEntry();
-
-	DWORD64 LocalControllerAddress = 0;
-	DWORD64 LocalPawnAddress = 0;
-
-	if (!memoryManager.ReadMemory(gGame.GetLocalControllerAddress(), LocalControllerAddress))
+	DWORD64 localControllerAddress = 0;
+	DWORD64 localPawnAddress = 0;
+	memoryManager.ReadMemory(gGame.GetLocalControllerAddress(), localControllerAddress);
+	memoryManager.ReadMemory(gGame.GetLocalPawnAddress(), localPawnAddress);
+	if (localControllerAddress == 0 || localPawnAddress == 0)
 	{
-		WebRadar::Invalidate();
-		return;
-	}
-	if (!memoryManager.ReadMemory(gGame.GetLocalPawnAddress(), LocalPawnAddress))
-	{
-		WebRadar::Invalidate();
+		if (g_globalVars)
+			g_globalVars->UpdateGlobalvars();
+		InvalidateEntityState();
 		return;
 	}
 
-	if (LocalPawnAddress == 0 || LocalControllerAddress == 0) {
-		g_globalVars->UpdateGlobalvars();
-		cachedResults.clear();
-		WebRadar::Invalidate();
+	m_currentTick = 0;
+	memoryManager.ReadMemory(
+		localControllerAddress + Offset.PlayerController.m_nTickBase,
+		m_currentTick);
+	if (m_currentTick == 0)
+	{
+		InvalidateEntityState();
+		return;
+	}
+	if (entitySnapshot.valid && m_currentTick < entitySnapshot.tick)
+	{
+		InvalidateEntityState();
 		return;
 	}
 
-	// LocalEntity
-	CEntity LocalEntity;
-	int LocalPlayerControllerIndex = -1;
-	const bool clientDataReady = LocalEntity.UpdateClientData();
-	if (!clientDataReady)
+	const EntityListCache& currentCache = gGame.GetEntityListCache();
+	const bool cacheInvalid =
+		currentCache.root == 0 || !currentCache.validPages.test(0);
+	const bool foregroundRequested = !backgroundRadarOnly;
+	const bool refreshSnapshot =
+		!entitySnapshot.valid ||
+		cacheInvalid ||
+		entitySnapshot.tick != m_currentTick ||
+		entitySnapshot.localControllerAddress != localControllerAddress ||
+		entitySnapshot.localPawnAddress != localPawnAddress ||
+		entitySnapshot.entityListGeneration != currentCache.generation ||
+		(foregroundRequested && !entitySnapshot.foregroundReady);
+
+	if (refreshSnapshot)
 	{
-		AimControl::ResetRuntime();
-		RCS::ResetRuntime();
+		if (!gGame.UpdateEntityListCache())
+		{
+			InvalidateEntityState();
+			return;
+		}
+
+		const std::string mapName = GetCurrentMapName();
+		if (mapName.empty())
+		{
+			InvalidateEntityState();
+			return;
+		}
+		if (entitySnapshot.valid && entitySnapshot.mapName != mapName)
+		{
+			entitySnapshot = {};
+			featureEntityCache.clear();
+			previousFeatureTick = 0;
+			WebRadar::Invalidate();
+		}
+
+		const EntityListCache& refreshedCache = gGame.GetEntityListCache();
+		bool hydrationSucceeded = false;
+		CEntity localEntity;
+		const bool clientDataReady = localEntity.UpdateClientData();
+		if (!clientDataReady)
+		{
+			AimControl::ResetRuntime();
+			RCS::ResetRuntime();
+		}
+
+		if (localEntity.UpdateController(localControllerAddress))
+		{
+			const bool localPawnReady = localEntity.UpdatePawn(localPawnAddress);
+			const bool localRadarPawnReady =
+				localPawnReady || localEntity.UpdateRadarPawn(localPawnAddress);
+			if (localRadarPawnReady)
+			{
+				int localPlayerControllerIndex = -1;
+				std::vector<EntityBatchData> batchData;
+				if (CollectEntityAddresses(
+					localControllerAddress,
+					localPlayerControllerIndex,
+					batchData))
+				{
+					std::vector<std::pair<int, CEntity>> entities;
+					EntityBatchProcessor processor;
+					const EntityBatchStatus radarStatus =
+						processor.ProcessRadarEntities(entities, batchData);
+					if (radarStatus != EntityBatchStatus::Failed)
+					{
+						WebRadar::Publish(localEntity, entities, m_currentTick, mapName);
+
+						EntitySnapshot candidate;
+						candidate.tick = m_currentTick;
+						candidate.entityListGeneration = refreshedCache.generation;
+						candidate.mapName = mapName;
+						candidate.localControllerAddress = localControllerAddress;
+						candidate.localPawnAddress = localPawnAddress;
+						candidate.localEntity = localEntity;
+						candidate.localPlayerControllerIndex = localPlayerControllerIndex;
+						candidate.entities = std::move(entities);
+						candidate.valid = true;
+
+						if (!backgroundRadarOnly && matrixReady && clientDataReady &&
+							(localPawnReady || MenuConfig::WorkInSpec))
+						{
+							const EntityBatchStatus foregroundStatus =
+								processor.ProcessForegroundEntities(
+									candidate.entities,
+									ESPConfig::ShowWeaponESP);
+							if (foregroundStatus != EntityBatchStatus::Failed)
+							{
+								candidate.foregroundReady = true;
+								featureEntityCache = candidate.entities;
+							}
+							else
+							{
+								featureEntityCache.clear();
+							}
+						}
+						else
+						{
+							featureEntityCache.clear();
+						}
+
+						entitySnapshot = std::move(candidate);
+						hydrationSucceeded = true;
+					}
+				}
+			}
+		}
+
+		if (!hydrationSucceeded)
+		{
+			const bool canReuse =
+				entitySnapshot.valid &&
+				entitySnapshot.mapName == mapName &&
+				entitySnapshot.localControllerAddress == localControllerAddress &&
+				entitySnapshot.localPawnAddress == localPawnAddress &&
+				entitySnapshot.entityListGeneration == refreshedCache.generation &&
+				m_currentTick >= entitySnapshot.tick &&
+				m_currentTick - entitySnapshot.tick <= 1;
+			if (!canReuse)
+			{
+				InvalidateEntityState();
+				return;
+			}
+			WebRadar::Publish(
+				entitySnapshot.localEntity,
+				entitySnapshot.entities,
+				entitySnapshot.tick,
+				entitySnapshot.mapName);
+		}
 	}
-	if (!LocalEntity.UpdateController(LocalControllerAddress))
-	{
-		WebRadar::Invalidate();
+
+	if (!entitySnapshot.valid)
 		return;
+
+	CEntity& localEntity = entitySnapshot.localEntity;
+	Base_Radar gameRadar;
+	if (!backgroundRadarOnly && RadarCFG::ShowRadar &&
+		(localEntity.Controller.TeamID != 0 || MenuConfig::ShowMenu))
+	{
+		RadarSetting(gameRadar);
 	}
-	const bool localPawnReady = LocalEntity.UpdatePawn(LocalPawnAddress);
-	const bool localRadarPawnReady = localPawnReady || LocalEntity.UpdateRadarPawn(LocalPawnAddress);
 
-	// Update m_currentTick
-	bool success = memoryManager.ReadMemory<DWORD>(LocalEntity.Controller.Address + Offset.PlayerController.m_nTickBase, m_currentTick);
-	if (!success) {
-		m_currentTick = 0;
-	}
-
-
-	// radar data
-	Base_Radar GameRadar;
-	if (!backgroundRadarOnly && ((RadarCFG::ShowRadar && LocalEntity.Controller.TeamID != 0)
-		|| (RadarCFG::ShowRadar && MenuConfig::ShowMenu)))
-		RadarSetting(GameRadar);
-
-	// Web radar hydration is independent of the full ESP/aim pipeline. Publish the
-	// lightweight snapshot first so later feature failures cannot stall clients.
-	auto radarEntities = CollectEntityData(LocalEntity, LocalPlayerControllerIndex, true, false);
-	if (!localRadarPawnReady || radarEntities.empty())
-		WebRadar::Invalidate();
-	else
-		WebRadar::Publish(LocalEntity, radarEntities, m_currentTick, GetCurrentMapName());
-
-	// Full entity processing is only needed by foreground features.
-	std::vector<EntityResult> entityResults;
-	if (!backgroundRadarOnly && matrixReady && clientDataReady && (localPawnReady || MenuConfig::WorkInSpec))
-		entityResults = ProcessEntities(LocalEntity, LocalPlayerControllerIndex);
-	if (backgroundRadarOnly || !matrixReady || !clientDataReady || (!localPawnReady && !MenuConfig::WorkInSpec))
+	if (backgroundRadarOnly || !matrixReady || !entitySnapshot.foregroundReady)
 	{
 		if (backgroundRadarOnly)
 			std::this_thread::sleep_for(std::chrono::milliseconds(20));
 		return;
 	}
+
+	const std::vector<EntityResult> entityResults =
+		ProcessEntities(entitySnapshot.entities, localEntity);
 	std::vector<AimControl::AimCandidate> aimCandidates;
 	aimCandidates.reserve(entityResults.size());
-	
-	// render, collect aim data
-	HandleEnts(entityResults, LocalEntity, LocalPlayerControllerIndex, GameRadar, aimCandidates);
+	HandleEnts(
+		entityResults,
+		localEntity,
+		entitySnapshot.localPlayerControllerIndex,
+		gameRadar,
+		aimCandidates);
 
-	Visual(LocalEntity);
-	Radar(GameRadar, LocalEntity);
-	MiscFuncs(LocalEntity, allowGameInput);
-	if (allowGameInput)
-		AIM(LocalEntity, aimCandidates);
+	Visual(localEntity);
+	Radar(gameRadar, localEntity);
+	const bool currentSnapshot = entitySnapshot.tick == m_currentTick;
+	MiscFuncs(localEntity, allowGameInput && currentSnapshot);
+	if (allowGameInput && currentSnapshot)
+		AIM(localEntity, aimCandidates);
+	else
+		AimControl::ResetRuntime();
 
-	int currentFPS = static_cast<int>(ImGui::GetIO().Framerate);
+	const int currentFPS = static_cast<int>(ImGui::GetIO().Framerate);
 	if (currentFPS > MenuConfig::RenderFPS)
 	{
-		int FrameWait = round(1000.0f / MenuConfig::RenderFPS);
-		std::this_thread::sleep_for(std::chrono::milliseconds(FrameWait));
+		const int frameWait = round(1000.0f / MenuConfig::RenderFPS);
+		std::this_thread::sleep_for(std::chrono::milliseconds(frameWait));
 	}
-	
-	// Run trigger and spectator updates once per game tick.
-	if (m_currentTick != m_previousTick)
+
+	if (currentSnapshot && m_currentTick != previousFeatureTick)
 	{
 		if (allowGameInput)
-			Trigger(LocalEntity, LocalPlayerControllerIndex);
-		
-		std::vector<CEntity> allEntities;
-		for (const auto& pair : cachedResults) {
-			allEntities.push_back(pair.second);
-		}
-		SpecList::GetSpectatorList(allEntities, LocalEntity);
-		m_previousTick = m_currentTick;
+			Trigger(localEntity, entitySnapshot.localPlayerControllerIndex);
+		if (MiscCFG::SpecList)
+			SpecList::GetSpectatorList(featureEntityCache, localEntity);
+		previousFeatureTick = m_currentTick;
 	}
 }
 
-// collect entity data
-	std::vector<std::pair<int, CEntity>> Cheats::CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex,
-		bool radarOnly, bool updateFeatureCache)
+bool Cheats::CollectEntityAddresses(
+	const DWORD64 localControllerAddress,
+	int& localPlayerControllerIndex,
+	std::vector<EntityBatchData>& batchData)
 {
-	// update only on new tick
-	//if (m_currentTick == m_previousTick)
-	//{
-	//	return cachedResults;
-	//}
+	localPlayerControllerIndex = -1;
+	batchData.clear();
+	const EntityListCache& cache = gGame.GetEntityListCache();
+	if (!cache.validPages.test(0) || cache.pages[0] == 0)
+		return false;
 
-	std::vector<EntityBatchData> batchData;
-	batchData.reserve(64);
-
-	// collect entity addresses
-	for (int entityIndex = 0; entityIndex < 64; ++entityIndex)
+	std::array<MemoryReadRequest, 64> controllerRequests{};
+	std::array<DWORD64, 64> controllerAddresses{};
+	std::array<std::uint8_t, 64> controllerSucceeded{};
+	for (size_t entityIndex = 0; entityIndex < controllerRequests.size(); ++entityIndex)
 	{
-		DWORD64 entityAddress = 0;
-		if (!memoryManager.ReadMemory<DWORD64>(gGame.GetEntityListEntry() + (entityIndex + 1) * 0x70, entityAddress))
+		controllerRequests[entityIndex] = {
+			cache.pages[0] + (entityIndex + 1) * 0x70,
+			sizeof(DWORD64)
+		};
+	}
+
+	const MemoryBatchReadResult controllerResult =
+		memoryManager.BatchReadMemoryBestEffort(
+			controllerRequests,
+			std::as_writable_bytes(std::span{ controllerAddresses }),
+			MemoryReadPolicy::BypassDataCache,
+			controllerSucceeded);
+	if (!controllerResult.completed)
+		return false;
+
+	std::vector<MemoryReadRequest> handleRequests;
+	std::vector<size_t> controllerIndices;
+	for (size_t entityIndex = 0; entityIndex < controllerAddresses.size(); ++entityIndex)
+	{
+		const DWORD64 controllerAddress = controllerAddresses[entityIndex];
+		if (controllerSucceeded[entityIndex] == 0 || controllerAddress == 0)
+			continue;
+		if (controllerAddress == localControllerAddress)
 		{
+			localPlayerControllerIndex = static_cast<int>(entityIndex);
 			continue;
 		}
+		handleRequests.emplace_back(
+			controllerAddress + Offset.Entity.PlayerPawn,
+			sizeof(DWORD));
+		controllerIndices.push_back(entityIndex);
+	}
 
-		// skip local player
-		if (entityAddress == localEntity.Controller.Address)
-		{
-			localPlayerControllerIndex = entityIndex;
+	if (handleRequests.empty())
+		return true;
+
+	std::vector<DWORD> pawnHandles(handleRequests.size(), 0);
+	std::vector<std::uint8_t> handleSucceeded(handleRequests.size(), 0);
+	const MemoryBatchReadResult handleResult = memoryManager.BatchReadMemoryBestEffort(
+		handleRequests,
+		std::as_writable_bytes(std::span{ pawnHandles }),
+		MemoryReadPolicy::BypassDataCache,
+		handleSucceeded);
+	if (!handleResult.completed)
+		return false;
+	for (size_t index = 0; index < pawnHandles.size(); ++index)
+	{
+		if (handleSucceeded[index] == 0)
+			pawnHandles[index] = 0;
+	}
+
+	std::vector<DWORD64> pawnAddresses(pawnHandles.size(), 0);
+	std::vector<std::uint8_t> pawnSucceeded(pawnHandles.size(), 0);
+	const MemoryBatchReadResult resolveResult =
+		gGame.ResolveEntityHandles(pawnHandles, pawnAddresses, pawnSucceeded);
+	if (!resolveResult.completed)
+		return false;
+
+	batchData.reserve(pawnAddresses.size());
+	for (size_t index = 0; index < pawnAddresses.size(); ++index)
+	{
+		if (pawnSucceeded[index] == 0 || pawnAddresses[index] == 0)
 			continue;
-		}
-
-		// get pawn address
-		CEntity tempEntity;
-		tempEntity.Controller.Address = entityAddress;
-		DWORD64 pawnAddress = tempEntity.Controller.GetPlayerPawnAddress();
-		
-		if (pawnAddress != 0)
-		{
-			batchData.emplace_back(entityIndex, entityAddress, pawnAddress);
-		}
+		const size_t entityIndex = controllerIndices[index];
+		batchData.emplace_back(
+			static_cast<int>(entityIndex),
+			controllerAddresses[entityIndex],
+			pawnAddresses[index]);
 	}
-
-	if (batchData.empty())
-	{
-		if (updateFeatureCache)
-			cachedResults.clear();
-		WebRadar::Invalidate();
-		return {};
-	}
-
-	// process entities in batch
-	std::vector<std::pair<int, CEntity>> entities;
-	EntityBatchProcessor processor;
-	const bool processed = radarOnly
-		? processor.ProcessRadarEntities(entities, batchData)
-		: processor.ProcessAllEntities(entities, batchData);
-	if (!processed)
-	{
-		if (updateFeatureCache)
-			cachedResults.clear();
-		WebRadar::Invalidate();
-		return {};
-	}
-
-	if (updateFeatureCache)
-		cachedResults = entities;
-
-	return entities;
+	return true;
 }
 
-// process, prepare results
-std::vector<EntityResult> Cheats::ProcessEntities(CEntity& localEntity, int& localPlayerControllerIndex)
+std::vector<EntityResult> Cheats::ProcessEntities(
+	const std::vector<std::pair<int, CEntity>>& entities,
+	const CEntity& localEntity)
 {
-	// get batch-processed entities
-	auto entities = CollectEntityData(localEntity, localPlayerControllerIndex, false);
 	std::vector<EntityResult> results;
 	results.reserve(entities.size());
-
-	// process each entity
-	for (auto& [entityIndex, entity] : entities)
+	for (const auto& [entityIndex, entity] : entities)
 	{
 		EntityResult result;
 		result.entityIndex = entityIndex;
 		result.entity = entity;
-
-		if (!entity.IsAlive())
+		if (result.entity.Pawn.BoneData.BonePosList.empty() || !result.entity.IsAlive())
 			continue;
-
-		// skip teammates if team check enabled
-		if (MenuConfig::TeamCheck && entity.Controller.TeamID == localEntity.Controller.TeamID)
+		if (MenuConfig::TeamCheck &&
+			result.entity.Controller.TeamID == localEntity.Controller.TeamID)
+		{
 			continue;
+		}
 
-		// check if in screen
-		result.isInScreen = entity.IsInScreen();
-
-		// calculate distance
-		result.distance = static_cast<int>(entity.Pawn.Pos.DistanceTo(localEntity.Pawn.Pos) / 100);
-
-		// calculate esp box rect
+		result.isInScreen = result.entity.IsInScreen();
+		result.distance = static_cast<int>(
+			result.entity.Pawn.Pos.DistanceTo(localEntity.Pawn.Pos) / 100);
 		if (ESPConfig::ESPenabled && result.isInScreen)
-			result.espRect = ESP::GetBoxRect(entity, ESPConfig::BoxType);
-
-		// sound esp
-		if (ESPConfig::ESPenabled && ESPConfig::EnemySound && result.entity.Controller.Address != localEntity.Controller.Address)
+			result.espRect = ESP::GetBoxRect(result.entity, ESPConfig::BoxType);
+		if (ESPConfig::ESPenabled && ESPConfig::EnemySound &&
+			result.entity.Controller.Address != localEntity.Controller.Address)
+		{
 			SoundESP::ProcessSound(result.entity, localEntity);
-
+		}
 		result.isValid = true;
-		results.push_back(result);
+		results.push_back(std::move(result));
 	}
-	
 	return results;
 }
 
@@ -415,9 +559,7 @@ void Cheats::HandleEnts(const std::vector<EntityResult>& entities, CEntity& loca
 				// It is meaningless to render a empty bar
 				if ((ESPConfig::ArmorBar || ESPConfig::ShowArmorNum) && entity.Pawn.Armor > 0)
 				{
-					bool HasHelmet;
 					ImVec2 ArmorBarPos;
-					memoryManager.ReadMemory(entity.Controller.Address + Offset.PlayerController.HasHelmet, HasHelmet);
 					
 					if (ESPConfig::ShowHealthBar)
 						ArmorBarPos = { Rect.x - 10.f, Rect.y };
@@ -425,7 +567,7 @@ void Cheats::HandleEnts(const std::vector<EntityResult>& entities, CEntity& loca
 						ArmorBarPos = { Rect.x - 6.f, Rect.y };
 					
 					ImVec2 ArmorBarSize = { 4.f, Rect.w };
-					Render::DrawArmorBar(entity.Controller.Address, 100, entity.Pawn.Armor, HasHelmet, ArmorBarPos, ArmorBarSize);
+					Render::DrawArmorBar(entity.Controller.Address, 100, entity.Pawn.Armor, entity.Controller.HasHelmet, ArmorBarPos, ArmorBarSize);
 				}
 			}
 		}
@@ -504,8 +646,8 @@ void MiscFuncs(CEntity& LocalEntity, const bool allowGameInput)
     Misc::AntiAFKKickUpdate();
     if (MiscCFG::AutoKnife && !MenuConfig::ShowMenu) {
         std::vector<CEntity> enemyList;
-        enemyList.reserve(Cheats::cachedResults.size());
-        for (const auto& r : Cheats::cachedResults) enemyList.push_back(r.second);
+        enemyList.reserve(featureEntityCache.size());
+        for (const auto& r : featureEntityCache) enemyList.push_back(r.second);
         Misc::KnifeBot(LocalEntity, enemyList);
     }
     if (MiscCFG::AutoZeus && !MenuConfig::ShowMenu) {
@@ -558,11 +700,8 @@ void RenderCrosshair(ImDrawList* drawList, const CEntity& LocalEntity)
 	if (!MiscCFG::SniperCrosshair || LocalEntity.Controller.TeamID == 0 || MenuConfig::ShowMenu)
 		return;
 
-	bool isScoped;
-	memoryManager.ReadMemory<bool>(LocalEntity.Pawn.Address + Offset.Pawn.isScoped, isScoped);
-	std::string curWeapon = TriggerBot::GetWeapon(LocalEntity);
-
-	if (!TriggerBot::CheckScopeWeapon(curWeapon) || isScoped)
+	const std::string& currentWeapon = LocalEntity.Pawn.WeaponName;
+	if (!TriggerBot::CheckScopeWeapon(currentWeapon) || LocalEntity.Pawn.IsScoped)
 		return;
 
 	Render::DrawCrossHair(drawList, ImVec2(ImGui::GetIO().DisplaySize.x / 2, ImGui::GetIO().DisplaySize.y / 2), MiscCFG::SniperCrosshairColor);

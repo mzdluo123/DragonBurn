@@ -44,11 +44,10 @@ namespace SoundESP {
         if (entity.Pawn.Pos.DistanceTo(localEntity.Pawn.Pos) > MaxDistance)
             return;
 
-        float currentSoundTime = 0.0f;
-        bool Jumped = !entity.Pawn.HasFlag(PlayerPawn::Flags::ON_GROUND);
-
-        if (!memoryManager.ReadMemory<float>(entity.Pawn.Address + Offset.Pawn.m_flEmitSoundTime, currentSoundTime))
+        if (!entity.Pawn.EmitSoundTimeValid)
             return;
+        const float currentSoundTime = entity.Pawn.EmitSoundTime;
+        bool Jumped = !entity.Pawn.HasFlag(PlayerPawn::Flags::ON_GROUND);
         if (lastSoundTimes[entity.Controller.Address] == 0.0f) {
             lastSoundTimes[entity.Controller.Address] = currentSoundTime;
             return;

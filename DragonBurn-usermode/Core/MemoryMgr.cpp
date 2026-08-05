@@ -1,9 +1,7 @@
 #include "MemoryMgr.h"
 
-#include <functional>
 #include <limits>
 #include <utility>
-#include <vector>
 
 #include "DriverMemoryBackend.h"
 #include "MemProcFsMemoryBackend.h"
@@ -120,23 +118,17 @@ bool MemoryMgr::ReadMemoryBytes(
 
 bool MemoryMgr::ValidateBatch(
     const std::span<const MemoryReadRequest> requests,
-    const std::span<std::byte> output,
-    const std::span<SIZE_T> offsets) const noexcept
+    const std::span<std::byte> output) const noexcept
 {
     if (!backend_ || processId_ == 0 || requests.empty() ||
-        requests.size() > MaxBatchMemoryRequests || output.data() == nullptr || output.empty() ||
-        (!offsets.empty() && offsets.size() != requests.size() + 1))
+        requests.size() > MaxBatchMemoryRequests || output.data() == nullptr || output.empty())
     {
         return false;
     }
 
     SIZE_T outputSize = 0;
-    if (!offsets.empty())
-        offsets[0] = 0;
-
-    for (size_t index = 0; index < requests.size(); ++index)
+    for (const MemoryReadRequest& request : requests)
     {
-        const MemoryReadRequest& request = requests[index];
         if (request.address == 0 || request.size == 0 || request.size > MaxSingleMemoryReadSize ||
             request.address > (std::numeric_limits<DWORD64>::max)() - request.size ||
             request.size > MaxBatchMemoryOutputSize - outputSize)
@@ -145,8 +137,6 @@ bool MemoryMgr::ValidateBatch(
         }
 
         outputSize += request.size;
-        if (!offsets.empty())
-            offsets[index + 1] = outputSize;
     }
 
     return outputSize == output.size();
@@ -157,46 +147,38 @@ bool MemoryMgr::BatchReadMemory(
     const std::span<std::byte> output,
     const MemoryReadPolicy policy)
 {
-    if (!ValidateBatch(requests, output, {}))
+    if (!ValidateBatch(requests, output))
         return false;
 
-    return backend_->ReadBatch(requests, output, policy);
+    const MemoryBatchReadResult result = backend_->ReadBatch(requests, output, policy, {});
+    return result.completed && result.successfulRequests == requests.size();
 }
 
-bool MemoryMgr::BatchReadMemoryBestEffort(
+MemoryBatchReadResult MemoryMgr::BatchReadMemoryBestEffort(
     const std::span<const MemoryReadRequest> requests,
     const std::span<std::byte> output,
-    const MemoryReadPolicy policy)
+    const MemoryReadPolicy policy,
+    const std::span<std::uint8_t> requestSucceeded)
 {
-    std::vector<SIZE_T> outputOffsets(requests.size() + 1, 0);
-    if (!ValidateBatch(requests, output, outputOffsets))
-        return false;
+    if (requestSucceeded.data() != nullptr && !requestSucceeded.empty())
+        SecureZeroMemory(requestSucceeded.data(), requestSucceeded.size());
 
-    size_t successfulRequests = 0;
-    const auto readRange = [&](auto&& self, const size_t begin, const size_t end) -> void
+    if ((!requestSucceeded.empty() && requestSucceeded.size() != requests.size()) ||
+        !ValidateBatch(requests, output))
     {
-        const SIZE_T rangeOffset = outputOffsets[begin];
-        const SIZE_T rangeSize = outputOffsets[end] - rangeOffset;
-        if (backend_->ReadBatch(
-            requests.subspan(begin, end - begin),
-            output.subspan(rangeOffset, rangeSize),
-            policy))
-        {
-            successfulRequests += end - begin;
-            return;
-        }
+        if (output.data() != nullptr && !output.empty())
+            SecureZeroMemory(output.data(), output.size());
+        return {};
+    }
 
-        if (end - begin == 1)
-        {
-            SecureZeroMemory(output.data() + rangeOffset, rangeSize);
-            return;
-        }
+    const MemoryBatchReadResult result =
+        backend_->ReadBatch(requests, output, policy, requestSucceeded);
+    if (!result.completed)
+    {
+        SecureZeroMemory(output.data(), output.size());
+        if (!requestSucceeded.empty())
+            SecureZeroMemory(requestSucceeded.data(), requestSucceeded.size());
+    }
 
-        const size_t middle = begin + (end - begin) / 2;
-        self(self, begin, middle);
-        self(self, middle, end);
-    };
-
-    readRange(readRange, 0, requests.size());
-    return successfulRequests != 0;
+    return result;
 }

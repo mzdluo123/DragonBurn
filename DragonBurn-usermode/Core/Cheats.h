@@ -19,15 +19,16 @@ struct EntityResult {
 
 namespace Cheats
 {
-	static DWORD m_currentTick = 0;
-	static DWORD m_previousTick = 0;
-	static std::vector<std::pair<int, CEntity>> cachedResults;
 
 	void Run();
 	
-	std::vector<std::pair<int, CEntity>> CollectEntityData(CEntity& localEntity, int& localPlayerControllerIndex,
-		bool radarOnly = false, bool updateFeatureCache = true);
-	std::vector<EntityResult> ProcessEntities(CEntity& localEntity, int& localPlayerControllerIndex);
+	bool CollectEntityAddresses(
+		DWORD64 localControllerAddress,
+		int& localPlayerControllerIndex,
+		std::vector<EntityBatchData>& batchData);
+	std::vector<EntityResult> ProcessEntities(
+		const std::vector<std::pair<int, CEntity>>& entities,
+		const CEntity& localEntity);
 	void HandleEnts(const std::vector<EntityResult>& entities, CEntity& localEntity,
 		int localPlayerControllerIndex, Base_Radar& gameRadar,
 		std::vector<AimControl::AimCandidate>& aimCandidates);

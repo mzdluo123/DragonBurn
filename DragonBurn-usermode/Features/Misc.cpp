@@ -341,7 +341,7 @@ namespace Misc
 		DWORD uHandle = 0;
 		if (!memoryManager.ReadMemory<DWORD>(Local.Pawn.Address + Offset.Pawn.iIDEntIndex, uHandle)) return;
 		if (uHandle == -1) return;
-		DWORD64 PawnAddress = CEntity::ResolveEntityHandle(uHandle);
+		DWORD64 PawnAddress = gGame.ResolveEntityHandle(uHandle);
 		if (PawnAddress == 0) return;
 		CEntity targetEntity;
 		if (!targetEntity.UpdatePawn(PawnAddress)) return;

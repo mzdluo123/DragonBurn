@@ -1,11 +1,12 @@
 #pragma once
-#include <vector>
-#include <optional>
-#include <list>
-#include "Game.h"
 #include <cmath>
+#include <cstddef>
+#include <list>
+#include <span>
+#include <type_traits>
 #include <unordered_map>
-
+#include <vector>
+#include "Game.h"
 #undef M_PI
 #define M_PI 3.14159265358979323846
 
@@ -170,11 +171,14 @@ struct CBoneData {
 	Quaternion_t Rotation;
 };
 
-struct BoneJointData {
-	Vec3 Pos;
-	float Scale;
-	Quaternion_t Rotation;
+struct BoneMemoryRecord {
+	float position[3];
+	float scale;
+	float rotation[4];
 };
+
+static_assert(sizeof(BoneMemoryRecord) == 32, "Bone memory layout changed");
+static_assert(std::is_trivially_copyable_v<BoneMemoryRecord>);
 
 struct BoneJointPos {
 	Vec3 Pos;
@@ -193,9 +197,10 @@ public:
 	DWORD64 EntityPawnAddress = 0;
 	DWORD64 GameSceneNode = 0;
 
-	bool UpdateAllBoneData(const DWORD64& EntityPawnAddress);
-	//std::optional<CBoneData> GetBoneData(int index) const;
-	bool UpdateAllBoneDataBatch(const DWORD64& EntityPawnAddress);
+	bool LoadBoneBlock(
+		DWORD64 entityPawnAddress,
+		DWORD64 gameSceneNodeAddress,
+		std::span<const std::byte> rawBoneBlock);
 };
 
 namespace BoneJointList {

@@ -93,7 +93,7 @@ bool AimControl::AimBot(
         return false;
     }
 
-    const std::string currentWeapon = TriggerBot::GetWeapon(local);
+    const std::string& currentWeapon = local.Pawn.WeaponName;
     if (currentWeapon.empty() || !TriggerBot::CheckWeapon(currentWeapon) ||
         (onlyAuto && !CheckAutoMode(currentWeapon)) ||
         !HasReachedStartBullet(local.Pawn.ShotsFired, AimBullet))
@@ -108,14 +108,10 @@ bool AimControl::AimBot(
         return false;
     }
 
-    if (ScopeOnly && TriggerBot::CheckScopeWeapon(currentWeapon))
+    if (ScopeOnly && TriggerBot::CheckScopeWeapon(currentWeapon) && !local.Pawn.IsScoped)
     {
-        bool isScoped = false;
-        if (!memoryManager.ReadMemory<bool>(local.Pawn.Address + Offset.Pawn.isScoped, isScoped) || !isScoped)
-        {
-            ResetRuntime();
-            return false;
-        }
+        ResetRuntime();
+        return false;
     }
 
     const float sensitivity = local.Client.Sensitivity;

@@ -458,18 +458,27 @@ bool MemProcFsMemoryBackend::ResetScatter(const MemoryReadPolicy policy) noexcep
     return scatterHandle_ != nullptr;
 }
 
-bool MemProcFsMemoryBackend::ReadBatch(
+MemoryBatchReadResult MemProcFsMemoryBackend::ReadBatch(
     const std::span<const MemoryReadRequest> requests,
     const std::span<std::byte> output,
-    const MemoryReadPolicy policy)
+    const MemoryReadPolicy policy,
+    const std::span<std::uint8_t> requestSucceeded)
 {
+    if (output.data() != nullptr && !output.empty())
+        SecureZeroMemory(output.data(), output.size());
+    if (requestSucceeded.data() != nullptr && !requestSucceeded.empty())
+        SecureZeroMemory(requestSucceeded.data(), requestSucceeded.size());
+
     if (vmmHandle_ == nullptr || !api_ || processId_ == 0 || requests.empty() ||
         output.data() == nullptr || output.empty() || requests.size() > batchBytesRead_.size() ||
-        output.size() > batchScratch_.size() || !ResetScatter(policy))
+        output.size() > batchScratch_.size() ||
+        (!requestSucceeded.empty() && requestSucceeded.size() != requests.size()) ||
+        !ResetScatter(policy))
     {
-        return false;
+        return {};
     }
 
+    SecureZeroMemory(batchScratch_.data(), output.size());
     batchOffsets_[0] = 0;
     for (size_t index = 0; index < requests.size(); ++index)
     {
@@ -477,34 +486,42 @@ bool MemProcFsMemoryBackend::ReadBatch(
         if (request.address == 0 || request.size == 0 || request.size > MAXDWORD ||
             request.size > output.size() - batchOffsets_[index])
         {
-            return false;
+            return {};
         }
 
         batchOffsets_[index + 1] = batchOffsets_[index] + request.size;
         batchBytesRead_[index] = 0;
-        if (!api_->scatterPrepareEx(
+        api_->scatterPrepareEx(
             scatterHandle_,
             request.address,
             static_cast<DWORD>(request.size),
             reinterpret_cast<PBYTE>(batchScratch_.data() + batchOffsets_[index]),
-            &batchBytesRead_[index]))
-        {
-            return false;
-        }
+            &batchBytesRead_[index]);
     }
 
     if (batchOffsets_[requests.size()] != output.size() ||
         !api_->scatterExecuteRead(scatterHandle_))
     {
-        return false;
+        return {};
     }
 
+    SIZE_T successfulRequests = 0;
     for (size_t index = 0; index < requests.size(); ++index)
     {
-        if (batchBytesRead_[index] != requests[index].size)
-            return false;
+        if (batchBytesRead_[index] == requests[index].size)
+        {
+            ++successfulRequests;
+            if (!requestSucceeded.empty())
+                requestSucceeded[index] = 1;
+        }
+        else
+        {
+            SecureZeroMemory(
+                batchScratch_.data() + batchOffsets_[index],
+                requests[index].size);
+        }
     }
 
     std::memcpy(output.data(), batchScratch_.data(), output.size());
-    return true;
+    return { true, successfulRequests };
 }

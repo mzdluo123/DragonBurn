@@ -27,7 +27,7 @@ void TriggerBot::Run(const CEntity& LocalEntity, const int& LocalPlayerControlle
         return;
     }
 
-    DWORD64 PawnAddress = CEntity::ResolveEntityHandle(uHandle);
+    DWORD64 PawnAddress = gGame.ResolveEntityHandle(uHandle);
     if (PawnAddress == 0)
     {
         g_HasValidTarget = false;
@@ -91,7 +91,7 @@ bool TriggerBot::CanTrigger(const CEntity& LocalEntity, const CEntity& TargetEnt
         return false;
 
     // Check weapon type
-    std::string currentWeapon = GetWeapon(LocalEntity);
+    const std::string& currentWeapon = LocalEntity.Pawn.WeaponName;
     if (!CheckWeapon(currentWeapon))
         return false;
 
@@ -115,13 +115,8 @@ bool TriggerBot::CanTrigger(const CEntity& LocalEntity, const CEntity& TargetEnt
         return false;
 
     // Check scope requirement
-    if (ScopeOnly && CheckScopeWeapon(currentWeapon))
-    {
-        bool isScoped = false;
-        memoryManager.ReadMemory<bool>(LocalEntity.Pawn.Address + Offset.Pawn.isScoped, isScoped);
-        if (!isScoped)
-            return false;
-    }
+    if (ScopeOnly && CheckScopeWeapon(currentWeapon) && !LocalEntity.Pawn.IsScoped)
+        return false;
 
     return true;
 }
@@ -146,26 +141,6 @@ void TriggerBot::ExecuteShot()
     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 }
 
-std::string TriggerBot::GetWeapon(const CEntity& LocalEntity)
-{
-    const DWORD64 CurrentWeapon = LocalEntity.Pawn.GetActiveWeaponAddress();
-    if (CurrentWeapon == 0)
-        return "";
-
-    // Calculate the final address for weapon index directly
-    DWORD64 weaponIndexAddress = CurrentWeapon + Offset.EconEntity.AttributeManager +
-        Offset.WeaponBaseData.Item + Offset.WeaponBaseData.ItemDefinitionIndex;
-
-    // Single memory read to get weapon index
-    short weaponIndex;
-    if (!memoryManager.ReadMemory(weaponIndexAddress, weaponIndex) || weaponIndex == -1)
-        return "";
-
-    // Inline weapon name lookup
-    static const std::string defaultWeapon = "";
-    auto it = CEntity::weaponNames.find(weaponIndex);
-    return (it != CEntity::weaponNames.end()) ? it->second : defaultWeapon;
-}
 
 bool TriggerBot::CheckScopeWeapon(const std::string& WeaponName)
 {
