@@ -159,9 +159,23 @@ void Offsets::UpdateOffsets()
     {
         std::cout << "[i] Downloading latest offsets from cloud..." << std::endl;
         
-        offsets = Web::Get("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json");
-        buttons = Web::Get("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json");
-        client_dll = Web::Get("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json");
+        auto downloadWithFallback = [](const std::string& url) -> std::string
+        {
+            try
+            {
+                return Web::Get(url);
+            }
+            catch (const std::exception& e)
+            {
+                std::cout << "[!] Direct GitHub download failed: " << e.what() << std::endl;
+                std::cout << "[i] Retrying via gh-proxy.com..." << std::endl;
+                return Web::Get("https://gh-proxy.com/" + url);
+            }
+        };
+
+        offsets = downloadWithFallback("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json");
+        buttons = downloadWithFallback("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/buttons.json");
+        client_dll = downloadWithFallback("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json");
 
         storage::WriteStorageFile("offsets.json", offsets);
         storage::WriteStorageFile("buttons.json", buttons);
