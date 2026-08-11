@@ -13,6 +13,7 @@
 #include <string>
 #include <thread>
 #include <cmath>
+#include <unordered_map>
 
 #include "Cheats.h"
 #include "Render.h"
@@ -60,6 +61,10 @@ namespace
 	EntitySnapshot entitySnapshot;
 	std::vector<std::pair<int, CEntity>> featureEntityCache;
 
+	// How long a stale snapshot may be reused while re-hydration keeps failing
+	// (round restart pawn churn). ~0.5s at 64 tick.
+	constexpr DWORD kMaxSnapshotReuseTicks = 30;
+
 	void InvalidateEntityState()
 	{
 		entitySnapshot = {};
@@ -69,6 +74,34 @@ namespace
 		WebRadar::Invalidate();
 		AimControl::ResetRuntime();
 		RCS::ResetRuntime();
+	}
+
+	// Entities whose bone block read failed this tick keep last tick's bones
+	// (keyed by pawn address) instead of dropping out of ESP entirely.
+	void CarryOverBoneData(
+		const std::vector<std::pair<int, CEntity>>& previousEntities,
+		std::vector<std::pair<int, CEntity>>& currentEntities)
+	{
+		std::unordered_map<DWORD64, const CBone*> previousBones;
+		for (const auto& [entityIndex, entity] : previousEntities)
+		{
+			if (entity.Pawn.Address != 0 &&
+				!entity.Pawn.BoneData.BonePosList.empty())
+			{
+				previousBones.emplace(entity.Pawn.Address, &entity.Pawn.BoneData);
+			}
+		}
+		if (previousBones.empty())
+			return;
+
+		for (auto& [entityIndex, entity] : currentEntities)
+		{
+			if (!entity.Pawn.BoneData.BonePosList.empty())
+				continue;
+			const auto it = previousBones.find(entity.Pawn.Address);
+			if (it != previousBones.end())
+				entity.Pawn.BoneData = *it->second;
+		}
 	}
 }
 
@@ -113,11 +146,9 @@ void Cheats::Run()
 		InvalidateEntityState();
 		return;
 	}
-	if (entitySnapshot.valid && m_currentTick < entitySnapshot.tick)
-	{
-		InvalidateEntityState();
-		return;
-	}
+	// Tick base can regress on round restart/respawn; do not wipe state here.
+	// The mismatch triggers a re-hydration below, and the reuse window
+	// (kMaxSnapshotReuseTicks) keeps the previous snapshot alive meanwhile.
 
 	const EntityListCache& currentCache = gGame.GetEntityListCache();
 	const bool cacheInvalid =
@@ -197,6 +228,7 @@ void Cheats::Run()
 						candidate.entities = std::move(entities);
 						candidate.valid = true;
 
+						bool foregroundUsable = false;
 						if (!backgroundRadarOnly && matrixReady && clientDataReady &&
 							(localPawnReady || MenuConfig::WorkInSpec))
 						{
@@ -204,15 +236,24 @@ void Cheats::Run()
 								processor.ProcessForegroundEntities(
 									candidate.entities,
 									ESPConfig::ShowWeaponESP);
-							if (foregroundStatus != EntityBatchStatus::Failed)
-							{
-								candidate.foregroundReady = true;
-								featureEntityCache = candidate.entities;
-							}
-							else
-							{
-								featureEntityCache.clear();
-							}
+							foregroundUsable = foregroundStatus != EntityBatchStatus::Failed;
+						}
+
+						if (foregroundUsable)
+						{
+							if (entitySnapshot.valid)
+								CarryOverBoneData(entitySnapshot.entities, candidate.entities);
+							candidate.foregroundReady = true;
+							featureEntityCache = candidate.entities;
+						}
+						else if (entitySnapshot.valid && entitySnapshot.foregroundReady)
+						{
+							// Foreground data unavailable this tick (local pawn
+							// churn, matrix/batch read failure): keep previous
+							// bones instead of wiping ESP state.
+							CarryOverBoneData(entitySnapshot.entities, candidate.entities);
+							candidate.foregroundReady = true;
+							featureEntityCache = candidate.entities;
 						}
 						else
 						{
@@ -228,14 +269,16 @@ void Cheats::Run()
 
 		if (!hydrationSucceeded)
 		{
+			// Reuse the last good snapshot for a bounded window even when pawn
+			// addresses or the entity-list generation changed (round restart
+			// churn), instead of blanking ESP until a clean hydration.
+			const DWORD snapshotAge = m_currentTick >= entitySnapshot.tick
+				? m_currentTick - entitySnapshot.tick
+				: 0;
 			const bool canReuse =
 				entitySnapshot.valid &&
 				entitySnapshot.mapName == mapName &&
-				entitySnapshot.localControllerAddress == localControllerAddress &&
-				entitySnapshot.localPawnAddress == localPawnAddress &&
-				entitySnapshot.entityListGeneration == refreshedCache.generation &&
-				m_currentTick >= entitySnapshot.tick &&
-				m_currentTick - entitySnapshot.tick <= 1;
+				snapshotAge <= kMaxSnapshotReuseTicks;
 			if (!canReuse)
 			{
 				InvalidateEntityState();
